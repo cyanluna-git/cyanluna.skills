@@ -1,29 +1,29 @@
 ---
 name: kanban
-description: Manage project tasks in the central kanban DB (~/.claude/kanban.db). Supports 7-column AI team pipeline (Req → Plan → Review Plan → Impl → Review Impl → Test → Done), session context persistence, task CRUD, lifecycle documentation, and automated code review. Run /kanban-init first to register the project.
+description: Manage project tasks in per-project kanban DBs (~/.claude/kanban-dbs/{project}.db). Supports 7-column AI team pipeline (Req → Plan → Review Plan → Impl → Review Impl → Test → Done), session context persistence, task CRUD, lifecycle documentation, and automated code review. Run /kanban-init first to register the project.
 license: MIT
 ---
 
-Manages project tasks in the **central** `~/.claude/kanban.db` SQLite database shared across all projects.
-Each task has a `project` column that isolates data per project.
+Manages project tasks in **per-project** SQLite databases at `~/.claude/kanban-dbs/{project}.db`.
+Each project gets its own DB file — no WAL conflicts when multiple PCs work on different projects simultaneously.
 
 ## DB Path & Project Config
 
 Read project config from `.claude/kanban.json` (created by `/kanban-init`):
 
 ```bash
-# Read project name and DB path
+# Read project name
 CONFIG=$(cat .claude/kanban.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
-DB=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['db'].replace('~', '$HOME'))" 2>/dev/null || echo "$HOME/.claude/kanban.db")
+DB="$HOME/.claude/kanban-dbs/${PROJECT}.db"
 ```
 
-Central DB path (default when no config):
+Per-project DB path (default when no config):
 ```
-~/.claude/kanban.db
+~/.claude/kanban-dbs/<project>.db
 ```
 
-If `.claude/kanban.json` doesn't exist, prompt the user to run `/kanban-init` first, or fall back to `basename "$(pwd)"` as project name and `~/.claude/kanban.db` as DB.
+If `.claude/kanban.json` doesn't exist, prompt the user to run `/kanban-init` first, or fall back to `basename "$(pwd)"` as project name.
 
 ## Table Schema
 
@@ -191,16 +191,16 @@ Standard agent + model combinations:
 ### Priority: HTTP API → sqlite3 CLI
 
 1. **HTTP API** (preferred when kanban-board dev server is running): `http://localhost:5173`
-2. **sqlite3 CLI** (when dev server is not running, or for direct queries/bulk ops): `sqlite3 ~/.claude/kanban.db`
+2. **sqlite3 CLI** (when dev server is not running, or for direct queries/bulk ops): `sqlite3 ~/.claude/kanban-dbs/$PROJECT.db`
 
 **IMPORTANT**: Do NOT use Python (`python3 -c "import sqlite3..."`) for DB access. Always use the `sqlite3` CLI command which is installed at `/usr/bin/sqlite3`.
 
 ```bash
 # Quick read example
-sqlite3 -json ~/.claude/kanban.db "SELECT id, title, status, priority FROM tasks WHERE project='$PROJECT' ORDER BY id"
+sqlite3 -json ~/.claude/kanban-dbs/$PROJECT.db "SELECT id, title, status, priority FROM tasks WHERE project='$PROJECT' ORDER BY id"
 
 # Quick update example
-sqlite3 ~/.claude/kanban.db "UPDATE tasks SET status='impl', started_at=datetime('now') WHERE id=$ID"
+sqlite3 ~/.claude/kanban-dbs/$PROJECT.db "UPDATE tasks SET status='impl', started_at=datetime('now') WHERE id=$ID"
 ```
 
 Base URL: `http://localhost:5173` (default kanban-board port)
@@ -208,39 +208,39 @@ Base URL: `http://localhost:5173` (default kanban-board port)
 ### API Endpoints
 
 ```bash
-# Read task
-curl -s http://localhost:5173/api/task/$ID | jq .
+# Read task (scans all project DBs automatically)
+curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT" | jq .
 
 # Read board
 curl -s "http://localhost:5173/api/board?project=$PROJECT" | jq .
 
-# Update task (fields + status)
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+# Update task (fields + status) — project param required
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"plan": "...", "status": "plan_review"}'
 
-# Create task
+# Create task — body.project required
 curl -s -X POST http://localhost:5173/api/task \
   -H 'Content-Type: application/json' \
-  -d '{"title": "...", "project": "...", "priority": "medium", "description": "..."}'
+  -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"description\": \"...\"}"
 
-# Plan review result
-curl -s -X POST http://localhost:5173/api/task/$ID/plan-review \
+# Plan review result — project param required
+curl -s -X POST "http://localhost:5173/api/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "gemini", "status": "approved", "comment": "Plan looks good"}'
 
-# Impl review result
-curl -s -X POST http://localhost:5173/api/task/$ID/review \
+# Impl review result — project param required
+curl -s -X POST "http://localhost:5173/api/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "gemini", "status": "approved", "comment": "Code looks good"}'
 
-# Test result
-curl -s -X POST http://localhost:5173/api/task/$ID/test-result \
+# Test result — project param required
+curl -s -X POST "http://localhost:5173/api/task/$ID/test-result?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
 
-# Reorder / drag-and-drop
-curl -s -X PATCH http://localhost:5173/api/task/$ID/reorder \
+# Reorder / drag-and-drop — project param required
+curl -s -X PATCH "http://localhost:5173/api/task/$ID/reorder?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "plan", "afterId": null, "beforeId": null}'
 ```
@@ -276,7 +276,7 @@ Output format:
 
 If the kanban-board dev server is not running, fall back to sqlite3:
 ```bash
-sqlite3 -header -column ~/.claude/kanban.db \
+sqlite3 -header -column ~/.claude/kanban-dbs/$PROJECT.db \
   "SELECT id, title, status, priority FROM tasks WHERE project='$PROJECT' ORDER BY CASE status WHEN 'impl' THEN 0 WHEN 'impl_review' THEN 1 WHEN 'plan' THEN 2 WHEN 'plan_review' THEN 3 WHEN 'test' THEN 4 WHEN 'todo' THEN 5 WHEN 'done' THEN 6 END, id"
 ```
 
@@ -286,6 +286,8 @@ sqlite3 -header -column ~/.claude/kanban.db \
 **Run this first when starting a new session.** Shows pipeline state across all columns:
 ```bash
 BOARD=$(curl -s "http://localhost:5173/api/board?project=$PROJECT")
+# or without project to see all projects:
+BOARD=$(curl -s "http://localhost:5173/api/board")
 ```
 
 Output format:
@@ -332,7 +334,7 @@ curl -s -X POST http://localhost:5173/api/task \
 `/kanban move <ID> <status>`
 
 ```bash
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "{\"status\": \"$STATUS\"}"
 ```
@@ -420,12 +422,12 @@ Write a markdown plan with:
 - Edge cases to handle
 
 ## Record Results
-curl -s -X PATCH http://localhost:5173/api/task/<ID> \
+curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"plan": "<PLAN_MARKDOWN>", "status": "plan_review", "current_agent": "plan-agent"}'
 
 Also append to agent_log:
-curl -s -X PATCH http://localhost:5173/api/task/<ID> \
+curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"agent_log": "<UPDATED_LOG_JSON>"}'
 ```
@@ -487,19 +489,19 @@ Use Task tool: model="sonnet", subagent_type="general-purpose"
 Record result and agent_log:
 ```bash
 # 1. Record review result
-curl -s -X POST http://localhost:5173/api/task/$ID/plan-review \
+curl -s -X POST "http://localhost:5173/api/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "{\"reviewer\": \"$REVIEWER\", \"status\": \"$REVIEW_STATUS\", \"comment\": \"$REVIEW_COMMENT\"}"
 
 # 2. Append to agent_log (orchestrator must do this for review steps)
-CURRENT_LOG=$(curl -s http://localhost:5173/api/task/$ID | python3 -c "import sys,json; print(json.load(sys.stdin).get('agent_log') or '[]')")
+CURRENT_LOG=$(curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('agent_log') or '[]')")
 NEW_LOG=$(python3 -c "
 import json, datetime
 log = json.loads('''$CURRENT_LOG''')
 log.append({'agent': 'review-agent', 'model': '$REVIEWER', 'message': 'Plan review completed: $REVIEW_STATUS', 'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'})
 print(json.dumps(log))
 ")
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "{\"agent_log\": $(echo "$NEW_LOG" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")}"
 ```
@@ -531,7 +533,7 @@ You are a Worker Agent implementing Kanban task #<ID>.
 
 ## Record Results
 After implementation, update the task:
-curl -s -X PATCH http://localhost:5173/api/task/<ID> \
+curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"implementation_notes": "<NOTES_MARKDOWN>", "current_agent": "worker-agent"}'
 
@@ -560,7 +562,7 @@ You are a TDD Tester for Kanban task #<ID>.
 4. Append your test notes to implementation_notes
 
 ## Record Results
-curl -s -X PATCH http://localhost:5173/api/task/<ID> \
+curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"implementation_notes": "<UPDATED_NOTES>", "current_agent": "tdd-tester"}'
 
@@ -570,7 +572,7 @@ Do NOT change the status.
 
 After both complete, move to impl_review:
 ```bash
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "impl_review", "current_agent": null}'
 ```
@@ -622,19 +624,19 @@ REVIEW_RESULT=$(copilot -p "Review this code implementation:\n$REVIEW_INPUT\nEva
 Record result and agent_log:
 ```bash
 # 1. Record review result
-curl -s -X POST http://localhost:5173/api/task/$ID/review \
+curl -s -X POST "http://localhost:5173/api/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "{\"reviewer\": \"$REVIEWER\", \"status\": \"$REVIEW_STATUS\", \"comment\": \"$REVIEW_COMMENT\"}"
 
 # 2. Append to agent_log (orchestrator must do this for review steps)
-CURRENT_LOG=$(curl -s http://localhost:5173/api/task/$ID | python3 -c "import sys,json; print(json.load(sys.stdin).get('agent_log') or '[]')")
+CURRENT_LOG=$(curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('agent_log') or '[]')")
 NEW_LOG=$(python3 -c "
 import json, datetime
 log = json.loads('''$CURRENT_LOG''')
 log.append({'agent': 'code-review-agent', 'model': '$REVIEWER', 'message': 'Code review completed: $REVIEW_STATUS', 'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'})
 print(json.dumps(log))
 ")
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "{\"agent_log\": $(echo "$NEW_LOG" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")}"
 ```
@@ -662,7 +664,7 @@ You are a Test Runner Agent for Kanban task #<ID>.
 4. Report results
 
 ## Record Results
-curl -s -X POST http://localhost:5173/api/task/<ID>/test-result \
+curl -s -X POST "http://localhost:5173/api/task/<ID>/test-result?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"tester": "test-runner", "status": "pass" or "fail", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
 
@@ -718,10 +720,10 @@ Ask the user which fields to modify, then update via API.
 
 ```bash
 # Via API (if dev server running)
-curl -s -X DELETE http://localhost:5173/api/task/$ID
+curl -s -X DELETE "http://localhost:5173/api/task/$ID?project=$PROJECT"
 
 # Via sqlite3 CLI (if dev server not running)
-sqlite3 .claude/kanban.db "DELETE FROM tasks WHERE id=$ID;"
+sqlite3 ~/.claude/kanban-dbs/$PROJECT.db "DELETE FROM tasks WHERE id=$ID;"
 ```
 
 ### Stats
@@ -800,7 +802,7 @@ Run `/kanban-init` first to register this project. It creates `.claude/kanban.js
 
 If needed manually:
 ```bash
-sqlite3 ~/.claude/kanban.db "CREATE TABLE IF NOT EXISTS tasks (...);"
+sqlite3 ~/.claude/kanban-dbs/$PROJECT.db "CREATE TABLE IF NOT EXISTS tasks (...);"
 ```
 
 ## .gitignore
@@ -818,8 +820,8 @@ The implementation agent MUST record documentation at each phase. Summarize what
 ### Step 1: Start Pipeline
 
 ```bash
-# Move to plan
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+# Move to plan — project param required
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "plan", "current_agent": "plan-agent"}'
 ```
@@ -827,8 +829,8 @@ curl -s -X PATCH http://localhost:5173/api/task/$ID \
 ### Step 2: Record Plan
 
 ```bash
-# Record plan via API
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+# Record plan via API — project param required
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"plan": "## Implementation Plan\n\n### Files to Modify\n- src/lib/xxx.ts\n\n### Approach\n1. First modify XXX\n2. Then add YYY", "status": "plan_review"}'
 ```
@@ -836,8 +838,8 @@ curl -s -X PATCH http://localhost:5173/api/task/$ID \
 ### Step 3: Plan Review
 
 ```bash
-# Submit plan review
-curl -s -X POST http://localhost:5173/api/task/$ID/plan-review \
+# Submit plan review — project param required
+curl -s -X POST "http://localhost:5173/api/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "gemini", "status": "approved", "comment": "Plan is thorough and complete."}'
 ```
@@ -845,13 +847,13 @@ curl -s -X POST http://localhost:5173/api/task/$ID/plan-review \
 ### Step 4: Implementation
 
 ```bash
-# Record implementation
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+# Record implementation — project param required
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"implementation_notes": "## Changes\n\n### Modified Files\n- src/lib/xxx.ts: Added feature\n\n### Tests Added\n- test/xxx.test.ts: 5 new tests"}'
 
-# Move to impl_review
-curl -s -X PATCH http://localhost:5173/api/task/$ID \
+# Move to impl_review — project param required
+curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "impl_review"}'
 ```
@@ -859,8 +861,8 @@ curl -s -X PATCH http://localhost:5173/api/task/$ID \
 ### Step 5: Code Review
 
 ```bash
-# Submit code review
-curl -s -X POST http://localhost:5173/api/task/$ID/review \
+# Submit code review — project param required
+curl -s -X POST "http://localhost:5173/api/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "gemini", "status": "approved", "comment": "Code quality is good."}'
 ```
@@ -868,8 +870,8 @@ curl -s -X POST http://localhost:5173/api/task/$ID/review \
 ### Step 6: Test
 
 ```bash
-# Submit test results
-curl -s -X POST http://localhost:5173/api/task/$ID/test-result \
+# Submit test results — project param required
+curl -s -X POST "http://localhost:5173/api/task/$ID/test-result?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"tester": "test-runner", "status": "pass", "lint": "0 errors", "build": "OK", "tests": "42 passed", "comment": "All checks pass."}'
 ```

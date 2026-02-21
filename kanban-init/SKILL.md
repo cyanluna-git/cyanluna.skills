@@ -1,10 +1,10 @@
 ---
 name: kanban-init
-description: Register and initialize the current project in the central kanban DB (~/.claude/kanban.db). Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init.
+description: Register and initialize the current project in its own kanban DB (~/.claude/kanban-dbs/{project}.db). Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init.
 license: MIT
 ---
 
-Registers the current project in the central kanban DB (`~/.claude/kanban.db`) and creates a local config so `/kanban` knows which project to use.
+Registers the current project in a **per-project** `~/.claude/kanban-dbs/{project}.db` SQLite database and creates a local config so `/kanban` knows which project to use.
 
 ## Usage
 
@@ -25,11 +25,11 @@ The argument after `kanban-init` (if any) is the project name. Strip any leading
 PROJECT=$(basename "$(pwd)")
 ```
 
-### 2. Ensure central DB schema exists
+### 2. Ensure per-project DB schema exists
 
 ```bash
-mkdir -p ~/.claude
-sqlite3 ~/.claude/kanban.db "
+mkdir -p ~/.claude/kanban-dbs
+sqlite3 ~/.claude/kanban-dbs/${PROJECT}.db "
   CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project TEXT NOT NULL,
@@ -67,8 +67,7 @@ Create `.claude/kanban.json` in the **current project root**:
 
 ```json
 {
-  "project": "<PROJECT_NAME>",
-  "db": "~/.claude/kanban.db"
+  "project": "<PROJECT_NAME>"
 }
 ```
 
@@ -94,10 +93,10 @@ chmod +x kanban-board/start.sh
 ### 5. Output confirmation
 
 ```
-✅ Project '<PROJECT_NAME>' registered in central kanban.
+✅ Project '<PROJECT_NAME>' registered in kanban.
 
   Config:  .claude/kanban.json
-  DB:      ~/.claude/kanban.db
+  DB:      ~/.claude/kanban-dbs/<PROJECT_NAME>.db
   Board:   http://localhost:5173/?project=<PROJECT_NAME>
   Start:   ./kanban-board/start.sh
 
@@ -109,3 +108,66 @@ Add tasks with /kanban add <title>
 - If `.claude/kanban.json` already exists, read the current project name and ask the user whether to overwrite or keep as-is.
 - The central board (`~/.claude/kanban-board/`) must be installed. If `~/.claude/kanban-board/package.json` doesn't exist, warn the user.
 - `node_modules/` in the local `kanban-board/` is not created (no `pnpm install` needed — the central board handles its own deps).
+
+## OneDrive Sync Setup — symlink (macOS + WSL)
+
+Symlink each machine's local OneDrive folder to `~/.claude/kanban-dbs`.
+One-time setup per machine, no extra tools required.
+
+```
+macOS  ~/.claude/kanban-dbs → ~/Library/CloudStorage/OneDrive-Personal/dev/ai-kanban/dbs/
+WSL    ~/.claude/kanban-dbs → /mnt/c/Users/{winuser}/OneDrive/dev/ai-kanban/dbs/
+                               ↑ different physical paths, same OneDrive folder ✅
+```
+
+---
+
+### macOS (first time — first machine only)
+
+```bash
+ONEDRIVE="$HOME/Library/CloudStorage/OneDrive-Personal"
+# If the folder name differs: ls ~/Library/CloudStorage/ | grep -i onedrive
+
+# Create folders in OneDrive
+mkdir -p "$ONEDRIVE/dev/ai-kanban/dbs"
+mkdir -p "$ONEDRIVE/dev/ai-kanban/images"
+
+# Move existing local DBs → OneDrive
+cp ~/.claude/kanban-dbs/* "$ONEDRIVE/dev/ai-kanban/dbs/" 2>/dev/null || true
+
+# Remove local folder and create symlinks
+rm -rf ~/.claude/kanban-dbs ~/.claude/kanban-images
+ln -s "$ONEDRIVE/dev/ai-kanban/dbs"    ~/.claude/kanban-dbs
+ln -s "$ONEDRIVE/dev/ai-kanban/images" ~/.claude/kanban-images
+
+ls ~/.claude/kanban-dbs/   # DB files should appear
+```
+
+---
+
+### WSL (second machine — after OneDrive has synced)
+
+```bash
+# Auto-detect Windows username
+WINUSER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r\n')
+
+# Check OneDrive folder name (may be "OneDrive", "OneDrive - Personal", etc.)
+ls "/mnt/c/Users/$WINUSER/" | grep -i onedrive
+
+# Create symlinks (adjust folder name if needed)
+ONEDRIVE="/mnt/c/Users/$WINUSER/OneDrive"
+mkdir -p ~/.claude
+ln -s "$ONEDRIVE/dev/ai-kanban/dbs"    ~/.claude/kanban-dbs
+ln -s "$ONEDRIVE/dev/ai-kanban/images" ~/.claude/kanban-images
+
+ls ~/.claude/kanban-dbs/   # DB files uploaded from macOS should appear
+```
+
+---
+
+### Concurrent write safety
+
+| Scenario | Result |
+|---|---|
+| PC1: `unahouse.finance`, PC2: `jira.javis` simultaneously | ✅ Separate files — no WAL conflict |
+| PC1 and PC2 on the same project simultaneously | ⚠️ Same DB — work sequentially |

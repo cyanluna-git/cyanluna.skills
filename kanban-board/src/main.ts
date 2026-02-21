@@ -167,7 +167,7 @@ function renderCard(task: Task): string {
     : "";
 
   return `
-    <div class="card" draggable="true" data-id="${task.id}" data-status="${task.status}">
+    <div class="card" draggable="true" data-id="${task.id}" data-status="${task.status}" data-project="${task.project}">
       <div class="card-header">
         <span class="card-id">#${task.id}</span>
         ${levelBadge}
@@ -419,7 +419,7 @@ function renderTestEntries(results: any[]): string {
   `).join('');
 }
 
-async function uploadFiles(taskId: number, files: FileList | File[]) {
+async function uploadFiles(taskId: number, files: FileList | File[], project: string) {
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
     const reader = new FileReader();
@@ -427,23 +427,24 @@ async function uploadFiles(taskId: number, files: FileList | File[]) {
       reader.onload = () => resolve(reader.result as string);
       reader.readAsDataURL(file);
     });
-    await fetch(`/api/task/${taskId}/attachment`, {
+    await fetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: file.name, data }),
     });
   }
-  showTaskDetail(taskId);
+  showTaskDetail(taskId, project);
 }
 
-async function showTaskDetail(id: number) {
+async function showTaskDetail(id: number, project?: string) {
   const overlay = document.getElementById("modal-overlay")!;
   const content = document.getElementById("modal-content")!;
   content.innerHTML = '<div style="color:#94a3b8">Loading...</div>';
   overlay.classList.remove("hidden");
 
   try {
-    const res = await fetch(`/api/task/${id}`);
+    const projectParam = project ? `?project=${encodeURIComponent(project)}` : "";
+    const res = await fetch(`/api/task/${id}${projectParam}`);
     const task: Task = await res.json();
 
     const tags = parseTags(task.tags);
@@ -705,18 +706,18 @@ async function showTaskDetail(id: number) {
     const levelSelect = document.getElementById("level-select") as HTMLSelectElement;
     levelSelect.addEventListener("change", async () => {
       const newLevel = parseInt(levelSelect.value);
-      await fetch(`/api/task/${id}`, {
+      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ level: newLevel }),
       });
-      showTaskDetail(id);
+      showTaskDetail(id, task.project);
     });
 
     // Delete task handler
     document.getElementById("delete-task-btn")!.addEventListener("click", async () => {
       if (!confirm(`Delete card #${task.id} "${task.title}"?`)) return;
-      await fetch(`/api/task/${id}`, { method: "DELETE" });
+      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
       document.getElementById("modal-overlay")!.classList.add("hidden");
       refreshCurrentView();
     });
@@ -744,12 +745,12 @@ async function showTaskDetail(id: number) {
     reqSaveBtn.addEventListener("click", async () => {
       const newDesc = reqTextarea.value;
       reqSaveBtn.textContent = "Saving...";
-      await fetch(`/api/task/${id}`, {
+      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description: newDesc }),
       });
-      showTaskDetail(id);
+      showTaskDetail(id, task.project);
     });
 
     // Image attachment handlers
@@ -769,10 +770,10 @@ async function showTaskDetail(id: number) {
         e.preventDefault();
         dropZone.classList.remove("drop-active");
         const files = (e as DragEvent).dataTransfer?.files;
-        if (files) await uploadFiles(id, files);
+        if (files) await uploadFiles(id, files, task.project);
       });
       fileInput.addEventListener("change", async () => {
-        if (fileInput.files) await uploadFiles(id, fileInput.files);
+        if (fileInput.files) await uploadFiles(id, fileInput.files, task.project);
       });
     }
 
@@ -783,10 +784,10 @@ async function showTaskDetail(id: number) {
         const el = btn as HTMLElement;
         const taskId = el.dataset.id;
         const storedName = el.dataset.name;
-        await fetch(`/api/task/${taskId}/attachment/${encodeURIComponent(storedName!)}`, {
+        await fetch(`/api/task/${taskId}/attachment/${encodeURIComponent(storedName!)}?project=${encodeURIComponent(task.project)}`, {
           method: "DELETE",
         });
-        showTaskDetail(id);
+        showTaskDetail(id, task.project);
       });
     });
 
@@ -798,12 +799,12 @@ async function showTaskDetail(id: number) {
       const text = noteInput.value.trim();
       if (!text) return;
       noteInput.disabled = true;
-      await fetch(`/api/task/${id}/note`, {
+      await fetch(`/api/task/${id}/note?project=${encodeURIComponent(task.project)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      showTaskDetail(id);
+      showTaskDetail(id, task.project);
     });
 
     // Note delete buttons
@@ -811,8 +812,8 @@ async function showTaskDetail(id: number) {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
         const noteId = (btn as HTMLElement).dataset.noteId;
-        await fetch(`/api/task/${id}/note/${noteId}`, { method: "DELETE" });
-        showTaskDetail(id);
+        await fetch(`/api/task/${id}/note/${noteId}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
+        showTaskDetail(id, task.project);
       });
     });
   } catch {
@@ -847,7 +848,8 @@ async function loadBoard() {
     board.querySelectorAll(".card").forEach((el) => {
       el.addEventListener("click", () => {
         const id = parseInt((el as HTMLElement).dataset.id!);
-        showTaskDetail(id);
+        const project = (el as HTMLElement).dataset.project;
+        showTaskDetail(id, project);
       });
     });
 
@@ -902,7 +904,7 @@ async function loadListView() {
       const tags = parseTags(t.tags);
       const tagsHtml = tags.map(tag => `<span class="tag">${tag}</span>`).join("");
       return `
-        <tr class="status-${t.status}" data-id="${t.id}">
+        <tr class="status-${t.status}" data-id="${t.id}" data-project="${t.project}">
           <td class="col-id">#${t.id}</td>
           <td class="col-title">${t.title}</td>
           <td>
@@ -963,7 +965,9 @@ async function loadListView() {
         let value: string | number = el.value;
         if (field === "level") value = parseInt(value);
 
-        const resp = await fetch(`/api/task/${taskId}`, {
+        const row = el.closest("tr") as HTMLElement | null;
+        const project = row?.dataset.project || "";
+        const resp = await fetch(`/api/task/${taskId}?project=${encodeURIComponent(project)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ [field]: value }),
@@ -983,9 +987,10 @@ async function loadListView() {
     listView.querySelectorAll(".col-title").forEach((el) => {
       el.addEventListener("click", (e) => {
         e.stopPropagation();
-        const row = (el as HTMLElement).closest("tr")!;
+        const row = (el as HTMLElement).closest("tr")! as HTMLElement;
         const id = parseInt(row.dataset.id!);
-        showTaskDetail(id);
+        const project = row.dataset.project;
+        showTaskDetail(id, project);
       });
     });
   } catch (err) {
@@ -1059,8 +1064,9 @@ function setupDragAndDrop() {
   cards.forEach((card) => {
     card.addEventListener("dragstart", (e) => {
       const ev = e as DragEvent;
-      ev.dataTransfer!.setData("text/plain", (card as HTMLElement).dataset.id!);
-      (card as HTMLElement).classList.add("dragging");
+      const cardEl = card as HTMLElement;
+      ev.dataTransfer!.setData("text/plain", `${cardEl.dataset.project}:${cardEl.dataset.id}`);
+      cardEl.classList.add("dragging");
       isDragging = true;
     });
     card.addEventListener("dragend", () => {
@@ -1093,7 +1099,10 @@ function setupDragAndDrop() {
       clearDropIndicators();
 
       const ev = e as DragEvent;
-      const id = parseInt(ev.dataTransfer!.getData("text/plain"));
+      const dragData = ev.dataTransfer!.getData("text/plain");
+      const colonIdx = dragData.lastIndexOf(":");
+      const dragProject = colonIdx >= 0 ? dragData.slice(0, colonIdx) : "";
+      const id = parseInt(colonIdx >= 0 ? dragData.slice(colonIdx + 1) : dragData);
       const newStatus = colEl.dataset.column!;
       const beforeCard = getInsertBeforeCard(colEl, ev.clientY);
 
@@ -1112,7 +1121,7 @@ function setupDragAndDrop() {
         afterId = parseInt((cardsInCol[cardsInCol.length - 1] as HTMLElement).dataset.id!);
       }
 
-      const resp = await fetch(`/api/task/${id}/reorder`, {
+      const resp = await fetch(`/api/task/${id}/reorder?project=${encodeURIComponent(dragProject)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus, afterId, beforeId }),
@@ -1295,7 +1304,11 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
   const tagsRaw = (document.getElementById("add-tags") as HTMLInputElement).value.trim();
   const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : null;
 
-  const project = currentProject || undefined;
+  const project = currentProject;
+  if (!project) {
+    showToast("Select a project first");
+    return;
+  }
 
   const submitBtn = document.querySelector("#add-card-form .form-submit") as HTMLButtonElement;
   submitBtn.textContent = pendingFiles.length > 0 ? "Creating..." : "Add Card";
@@ -1310,7 +1323,7 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
 
   // Upload pending attachments
   if (pendingFiles.length > 0 && result.id) {
-    await uploadFiles(result.id, pendingFiles as any);
+    await uploadFiles(result.id, pendingFiles as any, project);
   }
 
   pendingFiles = [];

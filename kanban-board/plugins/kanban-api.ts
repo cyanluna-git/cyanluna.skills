@@ -7,14 +7,19 @@ import type { Plugin, ViteDevServer } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Central DB: ~/.claude/kanban.db (shared across all projects)
-const DB_PATH =
-  process.env.KANBAN_DB ||
-  path.resolve(os.homedir(), ".claude", "kanban.db");
+// Per-project DBs: ~/.claude/kanban-dbs/{project}.db
+const DBS_DIR =
+  process.env.KANBAN_DBS_DIR ||
+  path.resolve(os.homedir(), ".claude", "kanban-dbs");
 
 const IMAGES_DIR =
   process.env.KANBAN_IMAGES ||
   path.resolve(os.homedir(), ".claude", "kanban-images");
+
+// Ensure images directory exists
+if (!fs.existsSync(IMAGES_DIR)) {
+  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+}
 
 // Valid status transitions per pipeline level
 function getTransitions(level: number): Record<string, string[]> {
@@ -48,12 +53,21 @@ function getTransitions(level: number): Record<string, string[]> {
   };
 }
 
-let _db: Database.Database | null = null;
+// Project name → DB connection cache
+const _dbs = new Map<string, Database.Database>();
 
-function getDb(): Database.Database {
-  if (_db) return _db;
+function sanitizeProject(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
 
-  const db = new Database(DB_PATH);
+function getDb(project: string): Database.Database {
+  const safe = sanitizeProject(project);
+  if (_dbs.has(safe)) return _dbs.get(safe)!;
+
+  if (!fs.existsSync(DBS_DIR)) fs.mkdirSync(DBS_DIR, { recursive: true });
+
+  const dbPath = path.join(DBS_DIR, `${safe}.db`);
+  const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
 
   db.exec(`
@@ -76,62 +90,22 @@ function getDb(): Database.Database {
   `);
 
   // Migrate existing DB: add new columns if missing
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN review_comments TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN reviewed_at TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN plan TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN implementation_notes TEXT`);
-  } catch { /* column already exists */ }
-
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN rank INTEGER NOT NULL DEFAULT 0`);
-  } catch { /* column already exists */ }
-
-  // 7-column pipeline: new columns
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN plan_review_comments TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN test_results TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN agent_log TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN current_agent TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN plan_review_count INTEGER NOT NULL DEFAULT 0`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN impl_review_count INTEGER NOT NULL DEFAULT 0`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN planned_at TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN tested_at TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN level INTEGER NOT NULL DEFAULT 3`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN attachments TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    db.exec(`ALTER TABLE tasks ADD COLUMN notes TEXT`);
-  } catch { /* column already exists */ }
-
-  // Ensure images directory exists
-  if (!fs.existsSync(IMAGES_DIR)) {
-    fs.mkdirSync(IMAGES_DIR, { recursive: true });
-  }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN review_comments TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN reviewed_at TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN plan TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN implementation_notes TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN rank INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN plan_review_comments TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN test_results TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN agent_log TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN current_agent TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN plan_review_count INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN impl_review_count INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN planned_at TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN tested_at TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN level INTEGER NOT NULL DEFAULT 3`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN attachments TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN notes TEXT`); } catch { /* exists */ }
 
   // Backfill rank for existing rows (rank=0) with 1000-unit spacing per project+status group
   db.exec(`
@@ -153,8 +127,16 @@ function getDb(): Database.Database {
   db.exec(`UPDATE tasks SET status = 'impl' WHERE status = 'inprogress'`);
   db.exec(`UPDATE tasks SET status = 'impl_review' WHERE status = 'review'`);
 
-  _db = db;
+  _dbs.set(safe, db);
   return db;
+}
+
+// Scan all .db files in DBS_DIR (exclude WAL/SHM sidecar files)
+function getAllDbFiles(): string[] {
+  if (!fs.existsSync(DBS_DIR)) return [];
+  return fs.readdirSync(DBS_DIR).filter(
+    (f) => f.endsWith(".db") && !f.endsWith("-wal") && !f.endsWith("-shm")
+  );
 }
 
 function renumberRanks(db: Database.Database, project: string, status: string) {
@@ -236,89 +218,115 @@ export function kanbanApiPlugin(): Plugin {
       }
 
       server.middlewares.use(async (req, res, next) => {
+        const reqUrl = new URL(req.url || "/", "http://localhost");
+        const pathname = reqUrl.pathname;
+
         // GET /api/info  (project directory name)
-        if (req.url === "/api/info") {
+        if (pathname === "/api/info") {
           const projectName = path.basename(path.resolve(__dirname, "..", ".."));
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ projectName }));
           return;
         }
 
-        // GET /api/board?project=xxx
-        if (req.url?.startsWith("/api/board")) {
-          const url = new URL(req.url, "http://localhost");
-          const project = url.searchParams.get("project");
+        // GET /api/board?project=xxx  (or all projects if no param)
+        if (pathname === "/api/board") {
+          const projectParam = reqUrl.searchParams.get("project");
 
-          const db = getDb();
-          {
-            let tasks: Task[];
-            if (project) {
-              tasks = db
-                .prepare("SELECT * FROM tasks WHERE project = ? ORDER BY rank, id")
-                .all(project) as Task[];
-            } else {
-              tasks = db
-                .prepare("SELECT * FROM tasks ORDER BY project, rank, id")
+          let tasks: Task[];
+          let projects: string[];
+
+          if (projectParam) {
+            const db = getDb(projectParam);
+            tasks = db
+              .prepare("SELECT * FROM tasks WHERE project = ? ORDER BY rank, id")
+              .all(projectParam) as Task[];
+            projects = [projectParam];
+          } else {
+            // Aggregate all per-project DBs
+            const files = getAllDbFiles();
+            tasks = [];
+            const projectSet = new Set<string>();
+            for (const file of files) {
+              const projectName = path.basename(file, ".db");
+              const db = getDb(projectName);
+              const dbTasks = db
+                .prepare("SELECT * FROM tasks ORDER BY rank, id")
                 .all() as Task[];
+              tasks.push(...dbTasks);
+              // Collect actual project names from task rows (may differ from filename if unsanitized)
+              for (const t of dbTasks) projectSet.add(t.project);
+              if (dbTasks.length === 0) projectSet.add(projectName);
             }
-
-            const projects = (
-              db
-                .prepare("SELECT DISTINCT project FROM tasks ORDER BY project")
-                .all() as { project: string }[]
-            ).map((r) => r.project);
-
-            const grouped = new Map<string, Task[]>();
-            for (const t of tasks) {
-              const arr = grouped.get(t.status);
-              if (arr) arr.push(t);
-              else grouped.set(t.status, [t]);
-            }
-            const board: Board = {
-              todo: grouped.get("todo") || [],
-              plan: grouped.get("plan") || [],
-              plan_review: grouped.get("plan_review") || [],
-              impl: grouped.get("impl") || [],
-              impl_review: grouped.get("impl_review") || [],
-              test: grouped.get("test") || [],
-              done: grouped.get("done") || [],
-              projects,
-            };
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(board));
+            projects = [...projectSet].sort();
           }
+
+          const grouped = new Map<string, Task[]>();
+          for (const t of tasks) {
+            const arr = grouped.get(t.status);
+            if (arr) arr.push(t);
+            else grouped.set(t.status, [t]);
+          }
+          const board: Board = {
+            todo: grouped.get("todo") || [],
+            plan: grouped.get("plan") || [],
+            plan_review: grouped.get("plan_review") || [],
+            impl: grouped.get("impl") || [],
+            impl_review: grouped.get("impl_review") || [],
+            test: grouped.get("test") || [],
+            done: grouped.get("done") || [],
+            projects,
+          };
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(board));
           return;
         }
 
-        // GET /api/task/:id
-        if (req.url?.match(/^\/api\/task\/\d+$/) && req.method === "GET") {
-          const id = req.url.split("/").pop();
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT * FROM tasks WHERE id = ?")
-              .get(id) as Task | undefined;
+        // Route: /api/task/:id  (single task by id)
+        const taskMatch = pathname.match(/^\/api\/task\/(\d+)$/);
+        if (taskMatch) {
+          const id = taskMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+
+          // GET /api/task/:id  — scan all DBs if no project param
+          if (req.method === "GET") {
+            let task: Task | undefined;
+            if (projectParam) {
+              const db = getDb(projectParam);
+              task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task | undefined;
+            } else {
+              for (const file of getAllDbFiles()) {
+                const projectName = path.basename(file, ".db");
+                const db = getDb(projectName);
+                const found = db
+                  .prepare("SELECT * FROM tasks WHERE id = ?")
+                  .get(id) as Task | undefined;
+                if (found) { task = found; break; }
+              }
+            }
 
             if (!task) {
               res.statusCode = 404;
               res.end(JSON.stringify({ error: "Not found" }));
               return;
             }
-
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(task));
+            return;
           }
-          return;
-        }
 
-        // PATCH /api/task/:id  (move status, edit)
-        if (req.url?.match(/^\/api\/task\/\d+$/) && req.method === "PATCH") {
-          const id = req.url.split("/").pop();
-          const body = await parseBody(req);
-          if (body.status !== undefined) body.status = normalizeStatus(body.status);
-          const db = getDb();
-          {
+          // PATCH /api/task/:id?project=xxx  (move status, edit)
+          if (req.method === "PATCH") {
+            if (!projectParam) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "project query param required" }));
+              return;
+            }
+            const body = await parseBody(req);
+            if (body.status !== undefined) body.status = normalizeStatus(body.status);
+            const db = getDb(projectParam);
+
             // Status transition validation
             if (body.status !== undefined) {
               const task = db
@@ -360,496 +368,58 @@ export function kanbanApiPlugin(): Plugin {
                 sets.push("tested_at = NULL");
               }
             }
-            if (body.title !== undefined) {
-              sets.push("title = ?");
-              values.push(body.title);
-            }
-            if (body.priority !== undefined) {
-              sets.push("priority = ?");
-              values.push(body.priority);
-            }
-            if (body.description !== undefined) {
-              sets.push("description = ?");
-              values.push(body.description);
-            }
-            if (body.plan !== undefined) {
-              sets.push("plan = ?");
-              values.push(body.plan);
-            }
+            if (body.title !== undefined) { sets.push("title = ?"); values.push(body.title); }
+            if (body.priority !== undefined) { sets.push("priority = ?"); values.push(body.priority); }
+            if (body.description !== undefined) { sets.push("description = ?"); values.push(body.description); }
+            if (body.plan !== undefined) { sets.push("plan = ?"); values.push(body.plan); }
             if (body.implementation_notes !== undefined) {
               sets.push("implementation_notes = ?");
               values.push(body.implementation_notes);
             }
             if (body.tags !== undefined) {
               sets.push("tags = ?");
-              values.push(
-                typeof body.tags === "string"
-                  ? body.tags
-                  : JSON.stringify(body.tags)
-              );
+              values.push(typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags));
             }
             if (body.review_comments !== undefined) {
               sets.push("review_comments = ?");
-              values.push(
-                typeof body.review_comments === "string"
-                  ? body.review_comments
-                  : JSON.stringify(body.review_comments)
-              );
+              values.push(typeof body.review_comments === "string" ? body.review_comments : JSON.stringify(body.review_comments));
             }
             if (body.plan_review_comments !== undefined) {
               sets.push("plan_review_comments = ?");
-              values.push(
-                typeof body.plan_review_comments === "string"
-                  ? body.plan_review_comments
-                  : JSON.stringify(body.plan_review_comments)
-              );
+              values.push(typeof body.plan_review_comments === "string" ? body.plan_review_comments : JSON.stringify(body.plan_review_comments));
             }
             if (body.test_results !== undefined) {
               sets.push("test_results = ?");
-              values.push(
-                typeof body.test_results === "string"
-                  ? body.test_results
-                  : JSON.stringify(body.test_results)
-              );
+              values.push(typeof body.test_results === "string" ? body.test_results : JSON.stringify(body.test_results));
             }
             if (body.agent_log !== undefined) {
               sets.push("agent_log = ?");
-              values.push(
-                typeof body.agent_log === "string"
-                  ? body.agent_log
-                  : JSON.stringify(body.agent_log)
-              );
+              values.push(typeof body.agent_log === "string" ? body.agent_log : JSON.stringify(body.agent_log));
             }
-            if (body.current_agent !== undefined) {
-              sets.push("current_agent = ?");
-              values.push(body.current_agent);
-            }
-            if (body.reviewed_at !== undefined) {
-              sets.push("reviewed_at = ?");
-              values.push(body.reviewed_at);
-            }
-            if (body.rank !== undefined) {
-              sets.push("rank = ?");
-              values.push(body.rank);
-            }
-            if (body.level !== undefined) {
-              sets.push("level = ?");
-              values.push(body.level);
-            }
+            if (body.current_agent !== undefined) { sets.push("current_agent = ?"); values.push(body.current_agent); }
+            if (body.reviewed_at !== undefined) { sets.push("reviewed_at = ?"); values.push(body.reviewed_at); }
+            if (body.rank !== undefined) { sets.push("rank = ?"); values.push(body.rank); }
+            if (body.level !== undefined) { sets.push("level = ?"); values.push(body.level); }
 
             if (sets.length > 0) {
               values.push(id);
-              db.prepare(
-                `UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`
-              ).run(...values);
+              db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
             }
 
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ success: true }));
+            return;
           }
-          return;
-        }
 
-        // PATCH /api/task/:id/reorder  (reorder within or across columns)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/reorder$/) &&
-          req.method === "PATCH"
-        ) {
-          const id = parseInt(req.url.split("/")[3]);
-          const body = await parseBody(req);
-          if (body.status !== undefined) body.status = normalizeStatus(body.status);
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT * FROM tasks WHERE id = ?")
-              .get(id) as Task | undefined;
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
+          // DELETE /api/task/:id?project=xxx
+          if (req.method === "DELETE") {
+            if (!projectParam) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "project query param required" }));
               return;
             }
+            const db = getDb(projectParam);
 
-            const targetStatus = body.status || task.status;
-            const project = task.project;
-
-            // Status transition validation for drag-and-drop
-            if (targetStatus !== task.status) {
-              const transitions = getTransitions(task.level);
-              const allowed = transitions[task.status];
-              if (allowed && !allowed.includes(targetStatus)) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({
-                  error: `Invalid transition: ${task.status} -> ${targetStatus} (L${task.level})`,
-                  allowed,
-                }));
-                return;
-              }
-
-              const sets: string[] = ["status = ?"];
-              const vals: any[] = [targetStatus];
-              if (targetStatus === "plan") {
-                sets.push("started_at = COALESCE(started_at, datetime('now'))");
-              } else if (targetStatus === "plan_review") {
-                sets.push("planned_at = datetime('now')");
-              } else if (targetStatus === "test") {
-                sets.push("tested_at = datetime('now')");
-              } else if (targetStatus === "done") {
-                sets.push("completed_at = datetime('now')");
-              } else if (targetStatus === "todo") {
-                sets.push("started_at = NULL");
-                sets.push("planned_at = NULL");
-                sets.push("completed_at = NULL");
-                sets.push("reviewed_at = NULL");
-                sets.push("tested_at = NULL");
-              }
-              vals.push(id);
-              db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-            }
-
-            // Calculate new rank
-            let newRank: number;
-            const afterId = body.afterId as number | null;
-            const beforeId = body.beforeId as number | null;
-
-            if (afterId && beforeId) {
-              const above = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number } | undefined;
-              const below = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number } | undefined;
-              if (above && below) {
-                newRank = Math.floor((above.rank + below.rank) / 2);
-                if (newRank === above.rank) {
-                  renumberRanks(db, project, targetStatus);
-                  const a2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number };
-                  const b2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number };
-                  newRank = Math.floor((a2.rank + b2.rank) / 2);
-                }
-              } else {
-                newRank = 1000;
-              }
-            } else if (afterId) {
-              // Placing after a card (at the bottom)
-              const above = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number } | undefined;
-              newRank = above ? above.rank + 1000 : 1000;
-            } else if (beforeId) {
-              // Placing before a card (at the top)
-              const below = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number } | undefined;
-              if (below) {
-                newRank = Math.floor(below.rank / 2);
-                if (newRank === 0) {
-                  renumberRanks(db, project, targetStatus);
-                  const b2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number };
-                  newRank = Math.floor(b2.rank / 2);
-                }
-              } else {
-                newRank = 1000;
-              }
-            } else {
-              // Empty column
-              newRank = 1000;
-            }
-
-            db.prepare("UPDATE tasks SET rank = ? WHERE id = ?").run(newRank, id);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: true, rank: newRank }));
-          }
-          return;
-        }
-
-        // POST /api/task  (create new task)
-        if (req.url === "/api/task" && req.method === "POST") {
-          const body = await parseBody(req);
-          const db = getDb();
-          {
-            const project =
-              body.project ||
-              path.basename(path.resolve(__dirname, "..", ".."));
-            const title = body.title || "Untitled";
-            const priority = body.priority || "medium";
-            const description = body.description || null;
-            const tags =
-              body.tags !== undefined
-                ? typeof body.tags === "string"
-                  ? body.tags
-                  : JSON.stringify(body.tags)
-                : null;
-
-            const level = body.level !== undefined ? parseInt(body.level) || 3 : 3;
-
-            const maxRankRow = db
-              .prepare("SELECT MAX(rank) as maxRank FROM tasks WHERE project = ? AND status = 'todo'")
-              .get(project) as { maxRank: number | null } | undefined;
-            const rank = (maxRankRow?.maxRank ?? 0) + 1000;
-
-            const result = db
-              .prepare(
-                `INSERT INTO tasks (project, title, priority, description, tags, rank, level)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
-              )
-              .run(project, title, priority, description, tags, rank, level);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({ success: true, id: result.lastInsertRowid })
-            );
-          }
-          return;
-        }
-
-        // POST /api/task/:id/review  (append a review comment & auto-transition)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/review$/) &&
-          req.method === "POST"
-        ) {
-          const id = req.url.split("/")[3];
-          const body = await parseBody(req);
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT review_comments, status, impl_review_count, level FROM tasks WHERE id = ?")
-              .get(id) as { review_comments: string | null; status: string; impl_review_count: number; level: number } | undefined;
-
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
-              return;
-            }
-
-            const comments = task.review_comments
-              ? JSON.parse(task.review_comments)
-              : [];
-            const newComment = {
-              reviewer: body.reviewer || "claude-review-agent",
-              status: body.status,
-              comment: body.comment,
-              timestamp: new Date().toISOString(),
-            };
-            comments.push(newComment);
-
-            // L2: impl_review -> done (approved), L3: impl_review -> test (approved)
-            const approvedTarget = task.level <= 2 ? "done" : "test";
-            const newStatus =
-              body.status === "approved" ? approvedTarget : "impl";
-            const sets = [
-              "review_comments = ?",
-              "reviewed_at = datetime('now')",
-              "status = ?",
-              "impl_review_count = ?",
-            ];
-            const vals: any[] = [
-              JSON.stringify(comments),
-              newStatus,
-              task.impl_review_count + 1,
-            ];
-
-            if (newStatus === "test") {
-              sets.push("tested_at = datetime('now')");
-            } else if (newStatus === "done") {
-              sets.push("completed_at = datetime('now')");
-            }
-
-            vals.push(id);
-            db.prepare(
-              `UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`
-            ).run(...vals);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({ success: true, newStatus, comment: newComment })
-            );
-          }
-          return;
-        }
-
-        // POST /api/task/:id/plan-review  (plan review result)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/plan-review$/) &&
-          req.method === "POST"
-        ) {
-          const id = req.url.split("/")[3];
-          const body = await parseBody(req);
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT plan_review_comments, status, plan_review_count FROM tasks WHERE id = ?")
-              .get(id) as { plan_review_comments: string | null; status: string; plan_review_count: number } | undefined;
-
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
-              return;
-            }
-
-            const comments = task.plan_review_comments
-              ? JSON.parse(task.plan_review_comments)
-              : [];
-            const newComment = {
-              reviewer: body.reviewer || "plan-review-agent",
-              status: body.status,
-              comment: body.comment,
-              timestamp: new Date().toISOString(),
-            };
-            comments.push(newComment);
-
-            // plan_review -> impl (approved) or plan (changes_requested)
-            const newStatus =
-              body.status === "approved" ? "impl" : "plan";
-            const sets = [
-              "plan_review_comments = ?",
-              "status = ?",
-              "plan_review_count = ?",
-            ];
-            const vals: any[] = [
-              JSON.stringify(comments),
-              newStatus,
-              task.plan_review_count + 1,
-            ];
-
-            vals.push(id);
-            db.prepare(
-              `UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`
-            ).run(...vals);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({ success: true, newStatus, comment: newComment })
-            );
-          }
-          return;
-        }
-
-        // POST /api/task/:id/test-result  (test result)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/test-result$/) &&
-          req.method === "POST"
-        ) {
-          const id = req.url.split("/")[3];
-          const body = await parseBody(req);
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT test_results, status FROM tasks WHERE id = ?")
-              .get(id) as { test_results: string | null; status: string } | undefined;
-
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
-              return;
-            }
-
-            const results = task.test_results
-              ? JSON.parse(task.test_results)
-              : [];
-            const newResult = {
-              tester: body.tester || "test-runner-agent",
-              status: body.status,
-              lint: body.lint || null,
-              build: body.build || null,
-              tests: body.tests || null,
-              comment: body.comment || null,
-              timestamp: new Date().toISOString(),
-            };
-            results.push(newResult);
-
-            // test -> done (pass) or impl (fail)
-            const newStatus =
-              body.status === "pass" ? "done" : "impl";
-            const sets = [
-              "test_results = ?",
-              "status = ?",
-            ];
-            const vals: any[] = [JSON.stringify(results), newStatus];
-
-            if (newStatus === "done") {
-              sets.push("completed_at = datetime('now')");
-            }
-
-            vals.push(id);
-            db.prepare(
-              `UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`
-            ).run(...vals);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({ success: true, newStatus, result: newResult })
-            );
-          }
-          return;
-        }
-
-        // POST /api/task/:id/note  (add a user note)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/note$/) &&
-          req.method === "POST"
-        ) {
-          const id = req.url.split("/")[3];
-          const body = await parseBody(req);
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT notes FROM tasks WHERE id = ?")
-              .get(id) as { notes: string | null } | undefined;
-
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
-              return;
-            }
-
-            const notes = task.notes ? JSON.parse(task.notes) : [];
-            const note = {
-              id: Date.now(),
-              text: body.text || "",
-              author: body.author || "user",
-              timestamp: new Date().toISOString(),
-            };
-            notes.push(note);
-
-            db.prepare("UPDATE tasks SET notes = ? WHERE id = ?")
-              .run(JSON.stringify(notes), id);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: true, note }));
-          }
-          return;
-        }
-
-        // DELETE /api/task/:id/note/:noteId  (delete a note)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/note\/\d+$/) &&
-          req.method === "DELETE"
-        ) {
-          const parts = req.url.split("/");
-          const id = parts[3];
-          const noteId = parseInt(parts[5]);
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT notes FROM tasks WHERE id = ?")
-              .get(id) as { notes: string | null } | undefined;
-
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
-              return;
-            }
-
-            const notes = task.notes ? JSON.parse(task.notes) : [];
-            const filtered = notes.filter((n: any) => n.id !== noteId);
-
-            db.prepare("UPDATE tasks SET notes = ? WHERE id = ?")
-              .run(JSON.stringify(filtered), id);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: true }));
-          }
-          return;
-        }
-
-        // DELETE /api/task/:id  (delete task)
-        if (req.url?.match(/^\/api\/task\/\d+$/) && req.method === "DELETE") {
-          const id = req.url.split("/").pop();
-          const db = getDb();
-          {
             // Delete associated attachment files
             const task = db
               .prepare("SELECT attachments FROM tasks WHERE id = ?")
@@ -867,17 +437,383 @@ export function kanbanApiPlugin(): Plugin {
 
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ success: true }));
+            return;
           }
+        }
+
+        // PATCH /api/task/:id/reorder?project=xxx
+        const reorderMatch = pathname.match(/^\/api\/task\/(\d+)\/reorder$/);
+        if (reorderMatch && req.method === "PATCH") {
+          const id = parseInt(reorderMatch[1]);
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const body = await parseBody(req);
+          if (body.status !== undefined) body.status = normalizeStatus(body.status);
+          const db = getDb(projectParam);
+
+          const task = db
+            .prepare("SELECT * FROM tasks WHERE id = ?")
+            .get(id) as Task | undefined;
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const targetStatus = body.status || task.status;
+          const project = task.project;
+
+          // Status transition validation for drag-and-drop
+          if (targetStatus !== task.status) {
+            const transitions = getTransitions(task.level);
+            const allowed = transitions[task.status];
+            if (allowed && !allowed.includes(targetStatus)) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({
+                error: `Invalid transition: ${task.status} -> ${targetStatus} (L${task.level})`,
+                allowed,
+              }));
+              return;
+            }
+
+            const sets: string[] = ["status = ?"];
+            const vals: any[] = [targetStatus];
+            if (targetStatus === "plan") {
+              sets.push("started_at = COALESCE(started_at, datetime('now'))");
+            } else if (targetStatus === "plan_review") {
+              sets.push("planned_at = datetime('now')");
+            } else if (targetStatus === "test") {
+              sets.push("tested_at = datetime('now')");
+            } else if (targetStatus === "done") {
+              sets.push("completed_at = datetime('now')");
+            } else if (targetStatus === "todo") {
+              sets.push("started_at = NULL");
+              sets.push("planned_at = NULL");
+              sets.push("completed_at = NULL");
+              sets.push("reviewed_at = NULL");
+              sets.push("tested_at = NULL");
+            }
+            vals.push(id);
+            db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+          }
+
+          // Calculate new rank
+          let newRank: number;
+          const afterId = body.afterId as number | null;
+          const beforeId = body.beforeId as number | null;
+
+          if (afterId && beforeId) {
+            const above = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number } | undefined;
+            const below = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number } | undefined;
+            if (above && below) {
+              newRank = Math.floor((above.rank + below.rank) / 2);
+              if (newRank === above.rank) {
+                renumberRanks(db, project, targetStatus);
+                const a2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number };
+                const b2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number };
+                newRank = Math.floor((a2.rank + b2.rank) / 2);
+              }
+            } else {
+              newRank = 1000;
+            }
+          } else if (afterId) {
+            const above = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(afterId) as { rank: number } | undefined;
+            newRank = above ? above.rank + 1000 : 1000;
+          } else if (beforeId) {
+            const below = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number } | undefined;
+            if (below) {
+              newRank = Math.floor(below.rank / 2);
+              if (newRank === 0) {
+                renumberRanks(db, project, targetStatus);
+                const b2 = db.prepare("SELECT rank FROM tasks WHERE id = ?").get(beforeId) as { rank: number };
+                newRank = Math.floor(b2.rank / 2);
+              }
+            } else {
+              newRank = 1000;
+            }
+          } else {
+            newRank = 1000;
+          }
+
+          db.prepare("UPDATE tasks SET rank = ? WHERE id = ?").run(newRank, id);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, rank: newRank }));
           return;
         }
 
-        // POST /api/task/:id/attachment  (upload image as base64)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/attachment$/) &&
-          req.method === "POST"
-        ) {
-          const id = req.url.split("/")[3];
-          // Increase body size limit for images
+        // POST /api/task  (create new task — body.project required)
+        if (pathname === "/api/task" && req.method === "POST") {
+          const body = await parseBody(req);
+          const project = body.project;
+          if (!project) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "body.project is required" }));
+            return;
+          }
+
+          const db = getDb(project);
+          const title = body.title || "Untitled";
+          const priority = body.priority || "medium";
+          const description = body.description || null;
+          const tags =
+            body.tags !== undefined
+              ? typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags)
+              : null;
+          const level = body.level !== undefined ? parseInt(body.level) || 3 : 3;
+
+          const maxRankRow = db
+            .prepare("SELECT MAX(rank) as maxRank FROM tasks WHERE project = ? AND status = 'todo'")
+            .get(project) as { maxRank: number | null } | undefined;
+          const rank = (maxRankRow?.maxRank ?? 0) + 1000;
+
+          const result = db
+            .prepare(
+              `INSERT INTO tasks (project, title, priority, description, tags, rank, level)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(project, title, priority, description, tags, rank, level);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, id: result.lastInsertRowid }));
+          return;
+        }
+
+        // POST /api/task/:id/review?project=xxx
+        const reviewMatch = pathname.match(/^\/api\/task\/(\d+)\/review$/);
+        if (reviewMatch && req.method === "POST") {
+          const id = reviewMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const body = await parseBody(req);
+          const db = getDb(projectParam);
+
+          const task = db
+            .prepare("SELECT review_comments, status, impl_review_count, level FROM tasks WHERE id = ?")
+            .get(id) as { review_comments: string | null; status: string; impl_review_count: number; level: number } | undefined;
+
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const comments = task.review_comments ? JSON.parse(task.review_comments) : [];
+          const newComment = {
+            reviewer: body.reviewer || "claude-review-agent",
+            status: body.status,
+            comment: body.comment,
+            timestamp: new Date().toISOString(),
+          };
+          comments.push(newComment);
+
+          const approvedTarget = task.level <= 2 ? "done" : "test";
+          const newStatus = body.status === "approved" ? approvedTarget : "impl";
+          const sets = [
+            "review_comments = ?",
+            "reviewed_at = datetime('now')",
+            "status = ?",
+            "impl_review_count = ?",
+          ];
+          const vals: any[] = [JSON.stringify(comments), newStatus, task.impl_review_count + 1];
+
+          if (newStatus === "test") {
+            sets.push("tested_at = datetime('now')");
+          } else if (newStatus === "done") {
+            sets.push("completed_at = datetime('now')");
+          }
+
+          vals.push(id);
+          db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, newStatus, comment: newComment }));
+          return;
+        }
+
+        // POST /api/task/:id/plan-review?project=xxx
+        const planReviewMatch = pathname.match(/^\/api\/task\/(\d+)\/plan-review$/);
+        if (planReviewMatch && req.method === "POST") {
+          const id = planReviewMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const body = await parseBody(req);
+          const db = getDb(projectParam);
+
+          const task = db
+            .prepare("SELECT plan_review_comments, status, plan_review_count FROM tasks WHERE id = ?")
+            .get(id) as { plan_review_comments: string | null; status: string; plan_review_count: number } | undefined;
+
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const comments = task.plan_review_comments ? JSON.parse(task.plan_review_comments) : [];
+          const newComment = {
+            reviewer: body.reviewer || "plan-review-agent",
+            status: body.status,
+            comment: body.comment,
+            timestamp: new Date().toISOString(),
+          };
+          comments.push(newComment);
+
+          const newStatus = body.status === "approved" ? "impl" : "plan";
+          const sets = ["plan_review_comments = ?", "status = ?", "plan_review_count = ?"];
+          const vals: any[] = [JSON.stringify(comments), newStatus, task.plan_review_count + 1];
+
+          vals.push(id);
+          db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, newStatus, comment: newComment }));
+          return;
+        }
+
+        // POST /api/task/:id/test-result?project=xxx
+        const testResultMatch = pathname.match(/^\/api\/task\/(\d+)\/test-result$/);
+        if (testResultMatch && req.method === "POST") {
+          const id = testResultMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const body = await parseBody(req);
+          const db = getDb(projectParam);
+
+          const task = db
+            .prepare("SELECT test_results, status FROM tasks WHERE id = ?")
+            .get(id) as { test_results: string | null; status: string } | undefined;
+
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const results = task.test_results ? JSON.parse(task.test_results) : [];
+          const newResult = {
+            tester: body.tester || "test-runner-agent",
+            status: body.status,
+            lint: body.lint || null,
+            build: body.build || null,
+            tests: body.tests || null,
+            comment: body.comment || null,
+            timestamp: new Date().toISOString(),
+          };
+          results.push(newResult);
+
+          const newStatus = body.status === "pass" ? "done" : "impl";
+          const sets = ["test_results = ?", "status = ?"];
+          const vals: any[] = [JSON.stringify(results), newStatus];
+
+          if (newStatus === "done") sets.push("completed_at = datetime('now')");
+
+          vals.push(id);
+          db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, newStatus, result: newResult }));
+          return;
+        }
+
+        // POST /api/task/:id/note?project=xxx
+        const noteMatch = pathname.match(/^\/api\/task\/(\d+)\/note$/);
+        if (noteMatch && req.method === "POST") {
+          const id = noteMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const body = await parseBody(req);
+          const db = getDb(projectParam);
+
+          const task = db
+            .prepare("SELECT notes FROM tasks WHERE id = ?")
+            .get(id) as { notes: string | null } | undefined;
+
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const notes = task.notes ? JSON.parse(task.notes) : [];
+          const note = {
+            id: Date.now(),
+            text: body.text || "",
+            author: body.author || "user",
+            timestamp: new Date().toISOString(),
+          };
+          notes.push(note);
+
+          db.prepare("UPDATE tasks SET notes = ? WHERE id = ?").run(JSON.stringify(notes), id);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, note }));
+          return;
+        }
+
+        // DELETE /api/task/:id/note/:noteId?project=xxx
+        const noteDeleteMatch = pathname.match(/^\/api\/task\/(\d+)\/note\/(\d+)$/);
+        if (noteDeleteMatch && req.method === "DELETE") {
+          const id = noteDeleteMatch[1];
+          const noteId = parseInt(noteDeleteMatch[2]);
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+          const db = getDb(projectParam);
+
+          const task = db
+            .prepare("SELECT notes FROM tasks WHERE id = ?")
+            .get(id) as { notes: string | null } | undefined;
+
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const notes = task.notes ? JSON.parse(task.notes) : [];
+          const filtered = notes.filter((n: any) => n.id !== noteId);
+          db.prepare("UPDATE tasks SET notes = ? WHERE id = ?").run(JSON.stringify(filtered), id);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true }));
+          return;
+        }
+
+        // POST /api/task/:id/attachment?project=xxx  (upload image as base64)
+        const attachmentMatch = pathname.match(/^\/api\/task\/(\d+)\/attachment$/);
+        if (attachmentMatch && req.method === "POST") {
+          const id = attachmentMatch[1];
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
+          }
+
           const chunks: Buffer[] = [];
           req.on("data", (chunk: Buffer) => chunks.push(chunk));
           await new Promise<void>((resolve) => req.on("end", resolve));
@@ -890,97 +826,87 @@ export function kanbanApiPlugin(): Plugin {
             return;
           }
 
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT attachments FROM tasks WHERE id = ?")
-              .get(id) as { attachments: string | null } | undefined;
+          const db = getDb(projectParam);
+          const task = db
+            .prepare("SELECT attachments FROM tasks WHERE id = ?")
+            .get(id) as { attachments: string | null } | undefined;
 
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
-              return;
-            }
-
-            const filename = (body.filename || "image.png").replace(/[^a-zA-Z0-9._-]/g, "_");
-            const ext = path.extname(filename) || ".png";
-            const safeName = `${id}_${Date.now()}${ext}`;
-            const filePath = path.resolve(IMAGES_DIR, safeName);
-
-            // Decode base64 and save
-            const base64Data = body.data.replace(/^data:[^;]+;base64,/, "");
-            fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
-
-            // Update attachments array
-            const attachments = task.attachments
-              ? JSON.parse(task.attachments)
-              : [];
-            attachments.push({
-              filename: body.filename || "image.png",
-              storedName: safeName,
-              path: filePath,
-              url: `/api/uploads/${safeName}`,
-              size: fs.statSync(filePath).size,
-              uploaded_at: new Date().toISOString(),
-            });
-
-            db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?")
-              .run(JSON.stringify(attachments), id);
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({
-              success: true,
-              attachment: attachments[attachments.length - 1],
-            }));
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
           }
+
+          const filename = (body.filename || "image.png").replace(/[^a-zA-Z0-9._-]/g, "_");
+          const ext = path.extname(filename) || ".png";
+          const safeName = `${id}_${Date.now()}${ext}`;
+          const filePath = path.resolve(IMAGES_DIR, safeName);
+
+          const base64Data = body.data.replace(/^data:[^;]+;base64,/, "");
+          fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
+
+          const attachments = task.attachments ? JSON.parse(task.attachments) : [];
+          attachments.push({
+            filename: body.filename || "image.png",
+            storedName: safeName,
+            path: filePath,
+            url: `/api/uploads/${safeName}`,
+            size: fs.statSync(filePath).size,
+            uploaded_at: new Date().toISOString(),
+          });
+
+          db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?")
+            .run(JSON.stringify(attachments), id);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true, attachment: attachments[attachments.length - 1] }));
           return;
         }
 
-        // DELETE /api/task/:id/attachment/:filename  (remove attachment)
-        if (
-          req.url?.match(/^\/api\/task\/\d+\/attachment\/[^/]+$/) &&
-          req.method === "DELETE"
-        ) {
-          const parts = req.url.split("/");
-          const id = parts[3];
-          const storedName = decodeURIComponent(parts[5]);
-          const db = getDb();
-          {
-            const task = db
-              .prepare("SELECT attachments FROM tasks WHERE id = ?")
-              .get(id) as { attachments: string | null } | undefined;
-
-            if (!task) {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: "Not found" }));
-              return;
-            }
-
-            const attachments = task.attachments
-              ? JSON.parse(task.attachments)
-              : [];
-            const idx = attachments.findIndex((a: any) => a.storedName === storedName);
-            if (idx >= 0) {
-              const removed = attachments.splice(idx, 1)[0];
-              // Delete file
-              try { fs.unlinkSync(removed.path); } catch { /* ok */ }
-              db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?")
-                .run(JSON.stringify(attachments), id);
-            }
-
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: true }));
+        // DELETE /api/task/:id/attachment/:filename?project=xxx
+        const attachmentDeleteMatch = pathname.match(/^\/api\/task\/(\d+)\/attachment\/([^/]+)$/);
+        if (attachmentDeleteMatch && req.method === "DELETE") {
+          const id = attachmentDeleteMatch[1];
+          const storedName = decodeURIComponent(attachmentDeleteMatch[2]);
+          const projectParam = reqUrl.searchParams.get("project");
+          if (!projectParam) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "project query param required" }));
+            return;
           }
+          const db = getDb(projectParam);
+
+          const task = db
+            .prepare("SELECT attachments FROM tasks WHERE id = ?")
+            .get(id) as { attachments: string | null } | undefined;
+
+          if (!task) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+
+          const attachments = task.attachments ? JSON.parse(task.attachments) : [];
+          const idx = attachments.findIndex((a: any) => a.storedName === storedName);
+          if (idx >= 0) {
+            const removed = attachments.splice(idx, 1)[0];
+            try { fs.unlinkSync(removed.path); } catch { /* ok */ }
+            db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?")
+              .run(JSON.stringify(attachments), id);
+          }
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ success: true }));
           return;
         }
 
         // GET /api/uploads/:filename  (serve uploaded images)
-        if (req.url?.match(/^\/api\/uploads\/[^/]+$/) && req.method === "GET") {
-          const filename = decodeURIComponent(req.url.split("/").pop()!);
+        const uploadsMatch = pathname.match(/^\/api\/uploads\/([^/]+)$/);
+        if (uploadsMatch && req.method === "GET") {
+          const filename = decodeURIComponent(uploadsMatch[1]);
           const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
           const filePath = path.resolve(IMAGES_DIR, safeName);
 
-          // Prevent path traversal
           if (!filePath.startsWith(IMAGES_DIR)) {
             res.statusCode = 403;
             res.end(JSON.stringify({ error: "Forbidden" }));
