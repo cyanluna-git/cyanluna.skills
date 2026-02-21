@@ -4,6 +4,7 @@ interface Task {
   title: string;
   status: string;
   priority: string;
+  rank: number;
   description: string | null;
   plan: string | null;
   implementation_notes: string | null;
@@ -31,6 +32,7 @@ const COLUMNS = [
 ];
 
 let currentProject: string | null = null;
+let isDragging = false;
 
 function priorityClass(priority: string): string {
   if (priority === "high") return "high";
@@ -149,20 +151,93 @@ function renderColumn(
 }
 
 function simpleMarkdownToHtml(md: string): string {
-  return md
-    .replace(/```[\s\S]*?```/g, (match) => {
-      const code = match.replace(/```\w*\n?/, "").replace(/```$/, "");
-      return `<pre><code>${code}</code></pre>`;
-    })
-    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+  // Extract code blocks first to protect them
+  const codeBlocks: string[] = [];
+  let text = md.replace(/```[\s\S]*?```/g, (match) => {
+    const code = match.replace(/```\w*\n?/, "").replace(/```$/, "");
+    codeBlocks.push(`<pre><code>${code}</code></pre>`);
+    return `\x00CB${codeBlocks.length - 1}\x00`;
+  });
+
+  // Inline formatting
+  text = text
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/^\d+\.\s+(.+)$/gm, "<li>$1</li>")
-    .replace(/^[-*]\s+(.+)$/gm, "<li>$1</li>")
-    .replace(/\n\n/g, "<br><br>")
-    .replace(/\n/g, "<br>");
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  // Process line by line to build proper block structure
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let inUl = false;
+  let inOl = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Code block placeholder
+    const cbMatch = trimmed.match(/^\x00CB(\d+)\x00$/);
+    if (cbMatch) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      out.push(codeBlocks[parseInt(cbMatch[1])]);
+      continue;
+    }
+
+    // Headings
+    const h3 = trimmed.match(/^### (.+)$/);
+    if (h3) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      out.push(`<h3>${h3[1]}</h3>`);
+      continue;
+    }
+    const h2 = trimmed.match(/^## (.+)$/);
+    if (h2) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      out.push(`<h2>${h2[1]}</h2>`);
+      continue;
+    }
+    const h1 = trimmed.match(/^# (.+)$/);
+    if (h1) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      out.push(`<h1>${h1[1]}</h1>`);
+      continue;
+    }
+
+    // Unordered list
+    const ul = trimmed.match(/^[-*]\s+(.+)$/);
+    if (ul) {
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      if (!inUl) { out.push("<ul>"); inUl = true; }
+      out.push(`<li>${ul[1]}</li>`);
+      continue;
+    }
+
+    // Ordered list
+    const ol = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (ol) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (!inOl) { out.push("<ol>"); inOl = true; }
+      out.push(`<li>${ol[1]}</li>`);
+      continue;
+    }
+
+    // Close open lists on non-list lines
+    if (inUl) { out.push("</ul>"); inUl = false; }
+    if (inOl) { out.push("</ol>"); inOl = false; }
+
+    // Empty line = paragraph break, non-empty = paragraph
+    if (trimmed === "") {
+      out.push("");
+    } else {
+      out.push(`<p>${trimmed}</p>`);
+    }
+  }
+  if (inUl) out.push("</ul>");
+  if (inOl) out.push("</ol>");
+
+  return out.join("\n");
 }
 
 function renderLifecycleSection(
@@ -225,10 +300,26 @@ async function showTaskDetail(id: number) {
     };
     const currentPhase = statusPhase[task.status] ?? 0;
 
-    const requirementSection = renderLifecycleSection(
-      'Requirements', '\u{1F4CB}', 'phase-requirement',
-      task.description, currentPhase === 0
-    );
+    const reqBody = task.description
+      ? simpleMarkdownToHtml(task.description)
+      : `<span class="phase-empty">Not yet documented</span>`;
+    const requirementSection = `
+      <div class="lifecycle-phase phase-requirement ${currentPhase === 0 ? 'active' : ''}">
+        <div class="phase-header">
+          <span class="phase-icon">\u{1F4CB}</span>
+          <span class="phase-label">Requirements</span>
+          <button class="phase-edit-btn" id="req-edit-btn" title="Edit">&#9998;</button>
+        </div>
+        <div class="phase-body" id="req-body-view">${reqBody}</div>
+        <div class="phase-body hidden" id="req-body-edit">
+          <textarea id="req-textarea" rows="8">${(task.description || '').replace(/</g, '&lt;')}</textarea>
+          <div class="phase-edit-actions">
+            <button class="phase-save-btn" id="req-save-btn">Save</button>
+            <button class="phase-cancel-btn" id="req-cancel-btn">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
 
     const planSection = renderLifecycleSection(
       'Plan', '\u{1F5FA}\uFE0F', 'phase-plan',
@@ -291,6 +382,37 @@ async function showTaskDetail(id: number) {
         ${reviewSection}
       </div>
     `;
+
+    // Requirements edit handlers
+    const reqEditBtn = document.getElementById("req-edit-btn")!;
+    const reqView = document.getElementById("req-body-view")!;
+    const reqEdit = document.getElementById("req-body-edit")!;
+    const reqTextarea = document.getElementById("req-textarea") as HTMLTextAreaElement;
+    const reqSaveBtn = document.getElementById("req-save-btn")!;
+    const reqCancelBtn = document.getElementById("req-cancel-btn")!;
+
+    reqEditBtn.addEventListener("click", () => {
+      reqView.classList.add("hidden");
+      reqEdit.classList.remove("hidden");
+      reqTextarea.focus();
+    });
+
+    reqCancelBtn.addEventListener("click", () => {
+      reqTextarea.value = task.description || '';
+      reqEdit.classList.add("hidden");
+      reqView.classList.remove("hidden");
+    });
+
+    reqSaveBtn.addEventListener("click", async () => {
+      const newDesc = reqTextarea.value;
+      reqSaveBtn.textContent = "Saving...";
+      await fetch(`/api/task/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: newDesc }),
+      });
+      showTaskDetail(id);
+    });
   } catch {
     content.innerHTML = '<div style="color:#ef4444">Failed to load</div>';
   }
@@ -383,6 +505,31 @@ function renderProjectFilter(projects: string[]) {
   });
 }
 
+function getInsertBeforeCard(column: HTMLElement, y: number): HTMLElement | null {
+  const cards = [...column.querySelectorAll(".card:not(.dragging)")];
+  for (const card of cards) {
+    const rect = (card as HTMLElement).getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (y < midY) return card as HTMLElement;
+  }
+  return null;
+}
+
+function clearDropIndicators() {
+  document.querySelectorAll(".drop-indicator").forEach((el) => el.remove());
+}
+
+function showDropIndicator(column: HTMLElement, beforeCard: HTMLElement | null) {
+  clearDropIndicators();
+  const indicator = document.createElement("div");
+  indicator.className = "drop-indicator";
+  if (beforeCard) {
+    column.insertBefore(indicator, beforeCard);
+  } else {
+    column.appendChild(indicator);
+  }
+}
+
 function setupDragAndDrop() {
   const cards = document.querySelectorAll(".card");
   const columns = document.querySelectorAll(".column-body");
@@ -392,36 +539,84 @@ function setupDragAndDrop() {
       const ev = e as DragEvent;
       ev.dataTransfer!.setData("text/plain", (card as HTMLElement).dataset.id!);
       (card as HTMLElement).classList.add("dragging");
+      isDragging = true;
     });
     card.addEventListener("dragend", () => {
       (card as HTMLElement).classList.remove("dragging");
+      clearDropIndicators();
+      isDragging = false;
     });
   });
 
   columns.forEach((col) => {
     col.addEventListener("dragover", (e) => {
       e.preventDefault();
-      (col as HTMLElement).classList.add("drag-over");
+      const colEl = col as HTMLElement;
+      colEl.classList.add("drag-over");
+      const beforeCard = getInsertBeforeCard(colEl, (e as DragEvent).clientY);
+      showDropIndicator(colEl, beforeCard);
     });
-    col.addEventListener("dragleave", () => {
-      (col as HTMLElement).classList.remove("drag-over");
+    col.addEventListener("dragleave", (e) => {
+      const colEl = col as HTMLElement;
+      // Only remove if actually leaving the column (not entering a child)
+      if (!colEl.contains(e.relatedTarget as Node)) {
+        colEl.classList.remove("drag-over");
+        clearDropIndicators();
+      }
     });
-    col.addEventListener("drop", (e) => {
+    col.addEventListener("drop", async (e) => {
       e.preventDefault();
-      (col as HTMLElement).classList.remove("drag-over");
+      const colEl = col as HTMLElement;
+      colEl.classList.remove("drag-over");
+      clearDropIndicators();
+
       const ev = e as DragEvent;
       const id = parseInt(ev.dataTransfer!.getData("text/plain"));
-      const newStatus = (col as HTMLElement).dataset.column!;
-      moveTask(id, newStatus);
+      const newStatus = colEl.dataset.column!;
+      const beforeCard = getInsertBeforeCard(colEl, ev.clientY);
+
+      // Find afterId and beforeId
+      const cardsInCol = [...colEl.querySelectorAll(".card:not(.dragging)")];
+      let afterId: number | null = null;
+      let beforeId: number | null = null;
+
+      if (beforeCard) {
+        beforeId = parseInt(beforeCard.dataset.id!);
+        const idx = cardsInCol.indexOf(beforeCard);
+        if (idx > 0) {
+          afterId = parseInt((cardsInCol[idx - 1] as HTMLElement).dataset.id!);
+        }
+      } else if (cardsInCol.length > 0) {
+        afterId = parseInt((cardsInCol[cardsInCol.length - 1] as HTMLElement).dataset.id!);
+      }
+
+      await fetch(`/api/task/${id}/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus, afterId, beforeId }),
+      });
+      loadBoard();
     });
   });
 }
 
+// Set tab title to project name
+fetch("/api/info")
+  .then((r) => r.json())
+  .then((info: { projectName: string }) => {
+    if (info.projectName) {
+      document.title = `Kanban · ${info.projectName}`;
+      document.querySelector("header h1")!.textContent = `Kanban · ${info.projectName}`;
+    }
+  })
+  .catch(() => {});
+
 // Init
 loadBoard();
 
-// Auto-refresh every 10 seconds (pause when modal is open)
+// Auto-refresh every 10 seconds (pause when modal is open or dragging)
 setInterval(() => {
+  if (isDragging) return;
   const detailOpen = !document.getElementById("modal-overlay")!.classList.contains("hidden");
   const addOpen = !document.getElementById("add-card-overlay")!.classList.contains("hidden");
   if (!detailOpen && !addOpen) {

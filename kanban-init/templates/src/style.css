@@ -201,6 +201,15 @@ main#board {
   opacity: 0.4;
 }
 
+/* Drop indicator line for drag-and-drop reordering */
+.drop-indicator {
+  height: 3px;
+  background: #3b82f6;
+  border-radius: 2px;
+  margin: 2px 0;
+  flex-shrink: 0;
+}
+
 .card-header {
   display: flex;
   align-items: center;
@@ -391,25 +400,26 @@ main#board {
 #modal-content h2 {
   font-size: 0.95rem;
   color: #e2e8f0;
-  margin-top: 16px;
-  margin-bottom: 8px;
+  margin-top: 0.6em;
+  margin-bottom: 0.2em;
 }
 
 #modal-content h3 {
   font-size: 0.9rem;
   color: #cbd5e1;
-  margin-top: 12px;
-  margin-bottom: 6px;
+  margin-top: 0.5em;
+  margin-bottom: 0.15em;
 }
 
 #modal-content ul,
 #modal-content ol {
-  padding-left: 20px;
-  margin-bottom: 8px;
+  padding-left: 1.5em;
+  margin: 0.2em 0 0.4em;
 }
 
 #modal-content li {
-  margin-bottom: 4px;
+  margin: 0;
+  line-height: 1.5;
 }
 
 #modal-content code {
@@ -521,11 +531,113 @@ main#board {
 .phase-impl .phase-header { color: #f97316; }
 .phase-review .phase-header { color: #a78bfa; }
 
+/* Phase edit button */
+.phase-header {
+  position: relative;
+}
+.phase-edit-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #334155;
+  color: #64748b;
+  font-size: 0.8rem;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+.phase-edit-btn:hover {
+  color: #e2e8f0;
+  border-color: #60a5fa;
+}
+.phase-body.hidden {
+  display: none;
+}
+.phase-body textarea {
+  width: 100%;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  color: #e2e8f0;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 80px;
+}
+.phase-body textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+.phase-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.phase-save-btn,
+.phase-cancel-btn {
+  padding: 5px 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  border: none;
+}
+.phase-save-btn {
+  background: #3b82f6;
+  color: #fff;
+}
+.phase-save-btn:hover {
+  background: #2563eb;
+}
+.phase-cancel-btn {
+  background: #334155;
+  color: #94a3b8;
+}
+.phase-cancel-btn:hover {
+  background: #475569;
+}
+
 .phase-body {
-  padding: 12px 14px;
+  padding: 10px 14px;
   font-size: 0.8rem;
   color: #cbd5e1;
-  line-height: 1.6;
+  line-height: 1.5;
+}
+.phase-body p {
+  margin: 0 0 0.4em;
+}
+.phase-body p:last-child {
+  margin-bottom: 0;
+}
+.phase-body ul,
+.phase-body ol {
+  margin: 0.2em 0 0.4em;
+  padding-left: 1.5em;
+}
+.phase-body li {
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+}
+.phase-body h1,
+.phase-body h2,
+.phase-body h3 {
+  margin: 0.6em 0 0.2em;
+}
+.phase-body h1:first-child,
+.phase-body h2:first-child,
+.phase-body h3:first-child {
+  margin-top: 0;
+}
+.phase-body pre {
+  margin: 0.4em 0;
 }
 .phase-empty {
   color: #475569;
@@ -559,7 +671,22 @@ main#board {
 .review-comment {
   font-size: 0.8rem;
   color: #cbd5e1;
-  line-height: 1.6;
+  line-height: 1.5;
+}
+.review-comment p {
+  margin: 0 0 0.4em;
+}
+.review-comment p:last-child {
+  margin-bottom: 0;
+}
+.review-comment ul,
+.review-comment ol {
+  margin: 0.2em 0 0.4em;
+  padding-left: 1.5em;
+}
+.review-comment li {
+  margin: 0;
+  line-height: 1.5;
 }
 
 /* Scrollbar */
