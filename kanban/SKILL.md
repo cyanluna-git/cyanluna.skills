@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   current_agent TEXT,
   plan_review_count INTEGER NOT NULL DEFAULT 0,
   impl_review_count INTEGER NOT NULL DEFAULT 0,
+  level INTEGER NOT NULL DEFAULT 3,
+  attachments TEXT,
+  notes TEXT,
+  rank INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   started_at TEXT,
   planned_at TEXT,
@@ -71,6 +75,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 | `plan_review_count` | INTEGER | Number of plan review iterations |
 | `impl_review_count` | INTEGER | Number of impl review iterations |
 | `level` | INTEGER | Pipeline level: 1 (Quick), 2 (Standard), 3 (Full) |
+| `attachments` | TEXT | JSON array of attachment file names |
+| `notes` | TEXT | JSON array of note objects |
+| `rank` | INTEGER | Display order within column (drag-and-drop position) |
 
 ## Pipeline Levels
 
@@ -104,26 +111,12 @@ Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 
 ```
 todo        → plan
-plan        → plan_review, todo
+plan        → plan_review, impl (L2: skip review), todo
 plan_review → impl (approve), plan (reject)
 impl        → impl_review
 impl_review → test (approve), impl (reject)
 test        → done (pass), impl (fail)
 done        → (terminal)
-```
-
-### Card Lifecycle (7 Phases)
-
-Each card captures the full workflow. Clicking a card in the web board shows all phases in a modal:
-
-```
-Phase 1: Requirements       (description)            - What needs to be done
-Phase 2: Plan                (plan)                   - How to approach it
-Phase 3: Plan Review         (plan_review_comments)   - Plan verification
-Phase 4: Implementation      (implementation_notes)   - What was actually changed
-Phase 5: Implementation Review (review_comments)      - Code review results
-Phase 6: Test                (test_results)            - Test execution results
-Phase 7: Done                                          - Completed
 ```
 
 ### Comment Formats
@@ -243,13 +236,6 @@ curl -s -X POST "http://localhost:5173/api/task/$ID/test-result?project=$PROJECT
 curl -s -X PATCH "http://localhost:5173/api/task/$ID/reorder?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "plan", "afterId": null, "beforeId": null}'
-```
-
-## Project Name Detection
-
-Uses the basename of the current working directory:
-```bash
-basename "$(pwd)"
 ```
 
 ## Commands
@@ -391,6 +377,17 @@ STATUS=$(echo "$TASK" | jq -r '.status')
    - If review rejected, loop back automatically
    - If circuit breaker triggers, stop and notify user
 
+4. **After each agent completes, orchestrator appends to agent_log**:
+```bash
+python3 -c "
+import subprocess, json, datetime
+d = json.loads(subprocess.run(['curl','-s','http://localhost:5173/api/task/$ID?project=$PROJECT'], capture_output=True, text=True).stdout)
+log = json.loads(d.get('agent_log') or '[]')
+log.append({'agent':'AGENT_NAME','model':'MODEL','message':'MESSAGE','timestamp':datetime.datetime.utcnow().isoformat()+'Z'})
+subprocess.run(['curl','-s','-X','PATCH','http://localhost:5173/api/task/$ID?project=$PROJECT','-H','Content-Type: application/json','-d',json.dumps({'agent_log':json.dumps(log)})], capture_output=True)
+"
+```
+
 #### Agent Dispatch
 
 Based on task status, dispatch the appropriate agent:
@@ -425,11 +422,6 @@ Write a markdown plan with:
 curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"plan": "<PLAN_MARKDOWN>", "status": "plan_review", "current_agent": "plan-agent"}'
-
-Also append to agent_log:
-curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_log": "<UPDATED_LOG_JSON>"}'
 ```
 
 **`plan_review` → Review Agent (sonnet)**:
@@ -454,12 +446,11 @@ Review this implementation plan. Evaluate:
 3. Is the approach sound?
 
 ## Record Results
-# 1. Record review result
 curl -s -X POST "http://localhost:5173/api/task/<ID>/plan-review?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d '{"reviewer": "sonnet", "status": "approved" or "changes_requested", "comment": "<REVIEW_MARKDOWN>"}'
+  -d '{"reviewer": "sonnet", "status": "approved", "comment": "<REVIEW_MARKDOWN>"}'
 
-# 2. Append to agent_log (read current log, add entry, PATCH)
+Status must be exactly `"approved"` or `"changes_requested"`.
 ```
 
 Default mode: After review, ask user with AskUserQuestion whether to accept/reject.
@@ -488,12 +479,10 @@ You are a Worker Agent implementing Kanban task #<ID>.
 3. Document what you changed
 
 ## Record Results
-After implementation, update the task:
 curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"implementation_notes": "<NOTES_MARKDOWN>", "current_agent": "worker-agent"}'
 
-Also append to agent_log.
 Do NOT change the status - the orchestrator handles that.
 ```
 
@@ -513,16 +502,17 @@ You are a TDD Tester for Kanban task #<ID>.
 
 ## Your Job
 1. Read the implementation notes to understand what was changed
-2. Write or update tests for the new/modified code
+2. Write or update test code for the new/modified code
 3. Ensure test coverage for edge cases
 4. Append your test notes to implementation_notes
+
+Do NOT run tests — that's the Test Runner's job. Write test code only.
 
 ## Record Results
 curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{"implementation_notes": "<UPDATED_NOTES>", "current_agent": "tdd-tester"}'
 
-Also append to agent_log (read current log, add entry with agent="tdd-tester", model="sonnet", then PATCH).
 Do NOT change the status.
 ```
 
@@ -558,12 +548,11 @@ Review this code implementation. Evaluate:
 5. Performance: unnecessary queries, memory usage
 
 ## Record Results
-# 1. Record review result
 curl -s -X POST "http://localhost:5173/api/task/<ID>/review?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d '{"reviewer": "sonnet", "status": "approved" or "changes_requested", "comment": "<REVIEW_MARKDOWN>"}'
+  -d '{"reviewer": "sonnet", "status": "approved", "comment": "<REVIEW_MARKDOWN>"}'
 
-# 2. Append to agent_log (read current log, add entry, PATCH)
+Status must be exactly `"approved"` or `"changes_requested"`.
 ```
 
 Default mode: Ask user with AskUserQuestion whether to accept/reject.
@@ -591,9 +580,9 @@ You are a Test Runner Agent for Kanban task #<ID>.
 ## Record Results
 curl -s -X POST "http://localhost:5173/api/task/<ID>/test-result?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d '{"tester": "test-runner", "status": "pass" or "fail", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
+  -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
 
-Also append to agent_log (read current log, add entry with agent="test-runner", model="sonnet", then PATCH).
+Status must be exactly `"pass"` or `"fail"`.
 ```
 
 ### Step (Single Step)
@@ -703,80 +692,6 @@ Add to `.gitignore` (the DB lives centrally, not in the project):
 echo ".claude/kanban.json" >> .gitignore
 echo "kanban-board/" >> .gitignore
 ```
-
-## Agent Workflow (Lifecycle Documentation)
-
-The implementation agent MUST record documentation at each phase. Summarize what you would normally output in chat as markdown and write it to the card.
-
-### Step 1: Start Pipeline
-
-```bash
-# Move to plan — project param required
-curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "plan", "current_agent": "plan-agent"}'
-```
-
-### Step 2: Record Plan
-
-```bash
-# Record plan via API — project param required
-curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"plan": "## Implementation Plan\n\n### Files to Modify\n- src/lib/xxx.ts\n\n### Approach\n1. First modify XXX\n2. Then add YYY", "status": "plan_review"}'
-```
-
-### Step 3: Plan Review
-
-```bash
-# Submit plan review — project param required
-curl -s -X POST "http://localhost:5173/api/task/$ID/plan-review?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"reviewer": "sonnet", "status": "approved", "comment": "Plan is thorough and complete."}'
-```
-
-### Step 4: Implementation
-
-```bash
-# Record implementation — project param required
-curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"implementation_notes": "## Changes\n\n### Modified Files\n- src/lib/xxx.ts: Added feature\n\n### Tests Added\n- test/xxx.test.ts: 5 new tests"}'
-
-# Move to impl_review — project param required
-curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "impl_review"}'
-```
-
-### Step 5: Code Review
-
-```bash
-# Submit code review — project param required
-curl -s -X POST "http://localhost:5173/api/task/$ID/review?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"reviewer": "sonnet", "status": "approved", "comment": "Code quality is good."}'
-```
-
-### Step 6: Test
-
-```bash
-# Submit test results — project param required
-curl -s -X POST "http://localhost:5173/api/task/$ID/test-result?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"tester": "test-runner", "status": "pass", "lint": "0 errors", "build": "OK", "tests": "42 passed", "comment": "All checks pass."}'
-```
-
-### Summary
-
-| Phase | Field | Content | Written By |
-|-------|-------|---------|------------|
-| Requirements | `description` | What needs to be done | User |
-| Plan | `plan` | How to approach it | Plan Agent (opus) |
-| Plan Review | `plan_review_comments` | Plan verification | Review Agent (sonnet) |
-| Implementation | `implementation_notes` | What was changed + tests | Worker (opus) + TDD Tester (sonnet) |
-| Impl Review | `review_comments` | Code review results | Code Review Agent (sonnet) |
-| Test | `test_results` | Lint/build/test results | Test Runner (sonnet) |
 
 ## Web Board Viewer
 
