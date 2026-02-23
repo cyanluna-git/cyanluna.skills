@@ -63,6 +63,9 @@ sqlite3 ~/.claude/kanban-dbs/${PROJECT}.db "
     completed_at TEXT
   );
 "
+# OneDrive 동기화 안전성을 위해 WAL 모드 대신 DELETE 저널 모드 사용
+# WAL 모드는 -wal/-shm 사이드카 파일을 생성해 클라우드 동기화 시 파일 desync 위험이 있음
+sqlite3 ~/.claude/kanban-dbs/${PROJECT}.db "PRAGMA journal_mode=DELETE;"
 ```
 
 ### 3. Write local project config
