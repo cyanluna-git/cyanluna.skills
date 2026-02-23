@@ -232,33 +232,38 @@ export function kanbanApiPlugin(): Plugin {
         // GET /api/board?project=xxx  (or all projects if no param)
         if (pathname === "/api/board") {
           const projectParam = reqUrl.searchParams.get("project");
+          const allFiles = getAllDbFiles();
 
+          // Always collect ALL project names from all DBs (filter dropdown must always show all options)
+          const projectSet = new Set<string>();
+          for (const file of allFiles) {
+            const pName = path.basename(file, ".db");
+            const pDb = getDb(pName);
+            const dbProjects = pDb
+              .prepare("SELECT DISTINCT project FROM tasks")
+              .all() as { project: string }[];
+            for (const t of dbProjects) projectSet.add(t.project);
+            if (dbProjects.length === 0) projectSet.add(pName);
+          }
+          const projects = [...projectSet].sort();
+
+          // Load tasks — filtered by project or all
           let tasks: Task[];
-          let projects: string[];
-
           if (projectParam) {
             const db = getDb(projectParam);
             tasks = db
               .prepare("SELECT * FROM tasks WHERE project = ? ORDER BY rank, id")
               .all(projectParam) as Task[];
-            projects = [projectParam];
           } else {
-            // Aggregate all per-project DBs
-            const files = getAllDbFiles();
             tasks = [];
-            const projectSet = new Set<string>();
-            for (const file of files) {
-              const projectName = path.basename(file, ".db");
-              const db = getDb(projectName);
+            for (const file of allFiles) {
+              const pName = path.basename(file, ".db");
+              const db = getDb(pName);
               const dbTasks = db
                 .prepare("SELECT * FROM tasks ORDER BY rank, id")
                 .all() as Task[];
               tasks.push(...dbTasks);
-              // Collect actual project names from task rows (may differ from filename if unsanitized)
-              for (const t of dbTasks) projectSet.add(t.project);
-              if (dbTasks.length === 0) projectSet.add(projectName);
             }
-            projects = [...projectSet].sort();
           }
 
           const grouped = new Map<string, Task[]>();

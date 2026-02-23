@@ -1028,7 +1028,7 @@ function renderProjectFilter(projects: string[]) {
 
   document.getElementById("project-select")!.addEventListener("change", (e) => {
     currentProject = (e.target as HTMLSelectElement).value || null;
-    loadBoard();
+    refreshCurrentView();
   });
 }
 
