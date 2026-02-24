@@ -10,6 +10,13 @@
 
 ---
 
+<p align="center">
+  <a href="docs/demo.webm">
+    <img src="docs/screenshots/board-view.png" alt="Demo Video" width="720" />
+    <br/><em>Click to watch demo (25s)</em>
+  </a>
+</p>
+
 <table>
 <tr>
 <td width="50%"><img src="docs/screenshots/board-view.png" alt="Board View" /></td>
