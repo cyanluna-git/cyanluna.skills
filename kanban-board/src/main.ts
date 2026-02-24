@@ -88,16 +88,17 @@ function sortTasks(tasks: Task[]): Task[] {
 }
 
 function applySearchFilter() {
-  const q = currentSearch.toLowerCase();
+  const q = currentSearch.toLowerCase().replace(/^#/, '');
   const anyFilter = q.length > 0 || hideOldDone;
 
   if (currentView === 'board') {
     document.querySelectorAll<HTMLElement>('.card').forEach(card => {
       const searchOk = !q || (() => {
+        const id    = card.dataset.id || '';
         const title = card.querySelector('.card-title')?.textContent?.toLowerCase() || '';
         const desc  = card.querySelector('.card-desc')?.textContent?.toLowerCase() || '';
         const tags  = [...card.querySelectorAll('.tag')].map(t => t.textContent?.toLowerCase() || '').join(' ');
-        return title.includes(q) || desc.includes(q) || tags.includes(q);
+        return id === q || title.includes(q) || desc.includes(q) || tags.includes(q);
       })();
       const doneHidden = hideOldDone
         && card.dataset.status === 'done'
@@ -114,10 +115,11 @@ function applySearchFilter() {
   } else {
     document.querySelectorAll<HTMLElement>('#list-view tbody tr').forEach(row => {
       const searchOk = !q || (() => {
+        const id      = row.dataset.id || '';
         const title   = row.querySelector('.col-title')?.textContent?.toLowerCase() || '';
         const project = (row as HTMLTableRowElement).cells[5]?.textContent?.toLowerCase() || '';
         const tags    = [...row.querySelectorAll('.tag')].map(t => t.textContent?.toLowerCase() || '').join(' ');
-        return title.includes(q) || project.includes(q) || tags.includes(q);
+        return id === q || title.includes(q) || project.includes(q) || tags.includes(q);
       })();
       const doneHidden = hideOldDone
         && row.classList.contains('status-done')
