@@ -106,6 +106,7 @@ function getDb(project: string): Database.Database {
   try { db.exec(`ALTER TABLE tasks ADD COLUMN level INTEGER NOT NULL DEFAULT 3`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN attachments TEXT`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN notes TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN decision_log TEXT`); } catch { /* exists */ }
 
   // Backfill rank for existing rows (rank=0) with 1000-unit spacing per project+status group
   db.exec(`
@@ -170,6 +171,7 @@ interface Task {
   level: number;
   attachments: string | null;
   notes: string | null;
+  decision_log: string | null;
   created_at: string;
   started_at: string | null;
   planned_at: string | null;
@@ -405,6 +407,7 @@ export function kanbanApiPlugin(): Plugin {
             if (body.reviewed_at !== undefined) { sets.push("reviewed_at = ?"); values.push(body.reviewed_at); }
             if (body.rank !== undefined) { sets.push("rank = ?"); values.push(body.rank); }
             if (body.level !== undefined) { sets.push("level = ?"); values.push(body.level); }
+            if (body.decision_log !== undefined) { sets.push("decision_log = ?"); values.push(body.decision_log); }
 
             if (sets.length > 0) {
               values.push(id);

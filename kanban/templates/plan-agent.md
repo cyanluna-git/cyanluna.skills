@@ -32,6 +32,12 @@ Write a markdown plan with your signature header at the top:
 - Step-by-step approach
 - Key design decisions
 - Edge cases to handle
+
+## Key Decisions
+
+| Decision | Why | Alternatives Considered | Trade-off |
+|----------|-----|------------------------|-----------|
+| ... | ... | ... | ... |
 ```
 
 ## Record Results
@@ -42,5 +48,5 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Write signed plan and advance status
 curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d "{\"plan\": \"> **Planner** \`opus\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"status\": \"plan_review\", \"current_agent\": null}"
+  -d "{\"plan\": \"> **Planner** \`opus\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"status\": \"plan_review\", \"current_agent\": null}"
 ```

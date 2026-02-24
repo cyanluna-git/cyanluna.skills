@@ -760,6 +760,7 @@ main#board.hidden {
 }
 .phase-requirement .phase-header { color: #60a5fa; }
 .phase-plan .phase-header { color: #fbbf24; }
+.phase-decision-log .phase-header { color: #34d399; }
 .phase-plan-review .phase-header { color: #fb923c; }
 .phase-impl .phase-header { color: #f472b6; }
 .phase-review .phase-header { color: #a78bfa; }

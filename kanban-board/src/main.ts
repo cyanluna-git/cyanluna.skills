@@ -19,6 +19,7 @@ interface Task {
   level: number;
   attachments: string | null;
   notes: string | null;
+  decision_log: string | null;
   created_at: string;
   started_at: string | null;
   planned_at: string | null;
@@ -612,6 +613,15 @@ async function showTaskDetail(id: number, project?: string) {
       task.plan, currentPhase === 1 && !task.plan
     );
 
+    // Decision Log section (after plan, before plan review)
+    let decisionLogSection = '';
+    if (task.decision_log) {
+      decisionLogSection = renderLifecycleSection(
+        'Decision Log', '🧭', 'phase-decision-log',
+        task.decision_log, false
+      );
+    }
+
     // Plan Review section
     const planReviewComments = parseJsonArray(task.plan_review_comments);
     const planReviewContent = renderReviewEntries(planReviewComments);
@@ -750,6 +760,7 @@ async function showTaskDetail(id: number, project?: string) {
       <div class="lifecycle-sections">
         ${requirementSection}
         ${planSection}
+        ${decisionLogSection}
         ${planReviewSection}
         ${implSection}
         ${reviewSection}

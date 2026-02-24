@@ -254,6 +254,7 @@ Template files are at `~/.claude/skills/kanban/templates/`.
      <title>                  → task title
      <description>            → task description (requirements)
      <plan>                   → plan field value
+     <decision_log>           → decision_log field value
      <implementation_notes>   → implementation_notes field value
      <plan_review_comments>   → plan_review_comments field value
      <TIMESTAMP>              → current UTC time (ISO 8601)
@@ -349,8 +350,8 @@ The `agent_log` accumulates the full chronological history of all agents who tou
 
 | Nickname | Reads | Writes (signed) | Moves to |
 |----------|-------|-----------------|----------|
-| `Planner` | `description` | `plan` | `plan_review` |
-| `Critic` | `description`, `plan` | `plan_review_comments` | `impl` or `plan` |
+| `Planner` | `description` | `plan`, `decision_log` | `plan_review` |
+| `Critic` | `description`, `plan`, `decision_log` | `plan_review_comments` | `impl` or `plan` |
 | `Builder` | `description`, `plan`, `plan_review_comments` | `implementation_notes` | (none) |
 | `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) | `impl_review` |
 | `Inspector` | `description`, `plan`, `implementation_notes` | `review_comments` | `test` or `impl` |

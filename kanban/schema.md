@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   level INTEGER NOT NULL DEFAULT 3,
   attachments TEXT,
   notes TEXT,
+  decision_log TEXT,
   rank INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   started_at TEXT,
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 | `level` | INTEGER | Pipeline level: 1 (Quick), 2 (Standard), 3 (Full) |
 | `attachments` | TEXT | JSON array of attachment file names |
 | `notes` | TEXT | JSON array of note objects |
+| `decision_log` | TEXT | Key architecture decisions by Planner (markdown table) |
 | `rank` | INTEGER | Display order within column |
 
 ## Agent Nicknames
@@ -60,7 +62,7 @@ Each agent has a fixed nickname used in all log records, field headers, and `cur
 
 | Nickname | Role | Model | Writes to |
 |----------|------|-------|-----------|
-| `Planner` | Plan Agent | `opus` | `plan` |
+| `Planner` | Plan Agent | `opus` | `plan`, `decision_log` |
 | `Critic` | Plan Review Agent | `sonnet` | `plan_review_comments` |
 | `Builder` | Worker Agent | `opus` | `implementation_notes` |
 | `Shield` | TDD Tester | `sonnet` | `implementation_notes` (append) |
