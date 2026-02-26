@@ -1,11 +1,11 @@
 <h1 align="center">cyanluna.skills</h1>
 <p align="center">
-  AI-powered kanban pipeline for Claude Code — six autonomous agents, one board.
+  AI-powered kanban pipeline for Claude Code — seven autonomous agents, one board.
 </p>
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Claude_Code-skills-8A2BE2" alt="Claude Code Skills" />
-  <img src="https://img.shields.io/badge/version-2.0.0-green" alt="v2.0.0" />
+  <img src="https://img.shields.io/badge/version-2.1.0-green" alt="v2.1.0" />
 </p>
 
 ---
@@ -82,10 +82,10 @@ Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 | Column | Agent | Model | What happens |
 |--------|-------|-------|--------------|
 | **Requirements** | User | — | You describe what needs to be done |
-| **Plan** | `Planner` | opus | Reads requirements, writes implementation plan |
-| **Review Plan** | `Critic` | sonnet | Reviews the plan, approves or requests changes |
+| **Plan** | `Planner` | opus | Reads requirements, writes plan + decision log + done-when checklist |
+| **Review Plan** | `Critic` | sonnet | Scores plan on 3 dimensions, approves or requests changes |
 | **Implement** | `Builder` + `Shield` | opus + sonnet | Builder implements; Shield writes TDD tests |
-| **Review Impl** | `Inspector` | sonnet | Code review with approve/reject |
+| **Review Impl** | `Inspector` | sonnet | Scores code on 7 dimensions, approves or rejects |
 | **Test** | `Ranger` | sonnet | Runs lint, build, and test suite |
 | **Done** | — | — | Auto-commits with `[kanban #ID]` tag |
 
@@ -107,18 +107,56 @@ Each agent has a fixed **nickname** used as a signature in every field and log e
 
 | Nickname | Role | Model | Reads | Writes |
 |----------|------|-------|-------|--------|
-| `Planner` | Plan Agent | opus | description | plan |
-| `Critic` | Plan Review | sonnet | description, plan | plan_review_comments |
-| `Builder` | Worker | opus | description, plan, review comments | implementation_notes |
+| `Planner` | Plan Agent | opus | description | plan, decision_log, done_when |
+| `Critic` | Plan Review | sonnet | description, plan, decision_log, done_when | plan_review_comments |
+| `Builder` | Worker | opus | description, plan, done_when, review comments | implementation_notes |
 | `Shield` | TDD Tester | sonnet | description, implementation_notes | implementation_notes (append) |
-| `Inspector` | Code Review | sonnet | description, plan, implementation_notes | review_comments |
+| `Inspector` | Code Review | sonnet | description, plan, done_when, implementation_notes | review_comments |
 | `Ranger` | Test Runner | sonnet | implementation_notes | test_results |
+| `Refiner` | Requirements Refinement | sonnet | title, description | description (rewrite) |
 
 **Signature rule** — every agent prepends a header to its output:
 
 ```
 > **Planner** `opus` · 2026-02-24T10:00:00Z
 ```
+
+### Scoring Rubrics
+
+Review agents use structured scoring (1–5 per dimension) instead of plain approve/reject.
+
+**Critic** scores plans on 3 dimensions:
+
+| Dimension | What it measures |
+|-----------|-----------------|
+| Clarity | Is the plan unambiguous and actionable? |
+| Done-When Quality | Are completion criteria verifiable? |
+| Reversibility | Can changes be safely rolled back? |
+
+Average >= 4.0 → approved. Any score = 1 or average < 3.0 → changes requested.
+
+**Inspector** scores implementations on 7 dimensions:
+
+| Dimension | What it measures |
+|-----------|-----------------|
+| Code Quality | Clean, readable, follows conventions |
+| Error Handling | Graceful failures, no silent swallows |
+| Type Safety | Proper types, no `any` leaks |
+| Security | No injection, no leaked secrets |
+| Performance | No unnecessary allocations or loops |
+| Test Coverage | Critical paths covered |
+| Completion | All `done_when` criteria met |
+
+Completion = 1, Security = 1, or Type Safety = 1 → hard reject.
+
+### Done-When Verification Chain
+
+The `done_when` field connects agents into a verification loop:
+
+1. **Planner** writes a `done_when` checklist with verifiable completion criteria
+2. **Critic** reviews `done_when` quality — low score triggers `/kanban-refine` recommendation
+3. **Builder** must verify every `done_when` item before finishing
+4. **Inspector** checks that all `done_when` criteria are actually met
 
 ---
 
@@ -129,9 +167,10 @@ Each agent has a fixed **nickname** used as a signature in every field and log e
 - **Card detail modal** with lifecycle progress bar, editable requirements, level selector
 - **List view** with inline status/level/priority editing
 - **Search** by title, description, tags, or `#ID`
-- **Sort** by creation date, completion date, or default rank
-- **Hide old Done** toggle (3d+ threshold)
-- **Multi-project** support — all projects on one board, or filter by project
+- **Sort** by creation date, completion date, or default rank (persisted in localStorage)
+- **Hide old Done** toggle (3d+ threshold, persisted in localStorage)
+- **Multi-project** support — all projects on one board, or filter by project (persisted in localStorage)
+- **Copy card reference** — click to copy `#ID Title` to clipboard
 - **Notes** with markdown support
 - **Image attachments** with drag-and-drop upload
 - **Markdown rendering** in plan, implementation notes, and reviews
