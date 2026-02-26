@@ -19,6 +19,8 @@ interface Task {
   level: number;
   attachments: string | null;
   notes: string | null;
+  decision_log: string | null;
+  done_when: string | null;
   created_at: string;
   started_at: string | null;
   planned_at: string | null;
@@ -56,7 +58,7 @@ const STATUS_BADGES: Record<string, string> = {
   test:        "Testing",
 };
 
-let currentProject: string | null = null;
+let currentProject: string | null = localStorage.getItem('kanban-project');
 let isDragging = false;
 let currentView: "board" | "list" = "board";
 
@@ -548,6 +550,24 @@ async function showTaskDetail(id: number) {
       task.plan, currentPhase === 1 && !task.plan
     );
 
+    // Decision Log section (after plan, before plan review)
+    let decisionLogSection = '';
+    if (task.decision_log) {
+      decisionLogSection = renderLifecycleSection(
+        'Decision Log', '🧭', 'phase-decision-log',
+        task.decision_log, false
+      );
+    }
+
+    // Done When section (after decision log, before plan review)
+    let doneWhenSection = '';
+    if (task.done_when) {
+      doneWhenSection = renderLifecycleSection(
+        'Done When', '🎯', 'phase-done-when',
+        task.done_when, false
+      );
+    }
+
     // Plan Review section
     const planReviewComments = parseJsonArray(task.plan_review_comments);
     const planReviewContent = renderReviewEntries(planReviewComments);
@@ -686,6 +706,8 @@ async function showTaskDetail(id: number) {
       <div class="lifecycle-sections">
         ${requirementSection}
         ${planSection}
+        ${decisionLogSection}
+        ${doneWhenSection}
         ${planReviewSection}
         ${implSection}
         ${reviewSection}
@@ -1033,6 +1055,11 @@ function renderProjectFilter(projects: string[]) {
 
   document.getElementById("project-select")!.addEventListener("change", (e) => {
     currentProject = (e.target as HTMLSelectElement).value || null;
+    if (currentProject) {
+      localStorage.setItem('kanban-project', currentProject);
+    } else {
+      localStorage.removeItem('kanban-project');
+    }
     loadBoard();
   });
 }

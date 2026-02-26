@@ -20,6 +20,7 @@ interface Task {
   attachments: string | null;
   notes: string | null;
   decision_log: string | null;
+  done_when: string | null;
   created_at: string;
   started_at: string | null;
   planned_at: string | null;
@@ -57,12 +58,12 @@ const STATUS_BADGES: Record<string, string> = {
   test:        "Testing",
 };
 
-let currentProject: string | null = null;
+let currentProject: string | null = localStorage.getItem('kanban-project');
 let isDragging = false;
 let currentView: "board" | "list" = "board";
 let currentSearch: string = '';
-let currentSort: string = 'default';
-let hideOldDone: boolean = false;
+let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
+let hideOldDone: boolean = localStorage.getItem('kanban-hide-old') === 'true';
 
 function priorityClass(priority: string): string {
   if (priority === "high") return "high";
@@ -622,6 +623,15 @@ async function showTaskDetail(id: number, project?: string) {
       );
     }
 
+    // Done When section (after decision log, before plan review)
+    let doneWhenSection = '';
+    if (task.done_when) {
+      doneWhenSection = renderLifecycleSection(
+        'Done When', '🎯', 'phase-done-when',
+        task.done_when, false
+      );
+    }
+
     // Plan Review section
     const planReviewComments = parseJsonArray(task.plan_review_comments);
     const planReviewContent = renderReviewEntries(planReviewComments);
@@ -761,6 +771,7 @@ async function showTaskDetail(id: number, project?: string) {
         ${requirementSection}
         ${planSection}
         ${decisionLogSection}
+        ${doneWhenSection}
         ${planReviewSection}
         ${implSection}
         ${reviewSection}
@@ -1117,6 +1128,11 @@ function renderProjectFilter(projects: string[]) {
 
   document.getElementById("project-select")!.addEventListener("change", (e) => {
     currentProject = (e.target as HTMLSelectElement).value || null;
+    if (currentProject) {
+      localStorage.setItem('kanban-project', currentProject);
+    } else {
+      localStorage.removeItem('kanban-project');
+    }
     refreshCurrentView();
   });
 }
@@ -1280,6 +1296,12 @@ function refreshCurrentView() {
 // Init
 loadBoard();
 
+// Restore persisted UI state
+(document.getElementById("sort-select") as HTMLSelectElement).value = currentSort;
+if (hideOldDone) {
+  document.getElementById("hide-done-btn")!.classList.add("active");
+}
+
 // Tab switching
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
@@ -1306,12 +1328,14 @@ document.getElementById("search-input")!.addEventListener("input", (e) => {
 // Sort — requires re-render
 document.getElementById("sort-select")!.addEventListener("change", (e) => {
   currentSort = (e.target as HTMLSelectElement).value;
+  localStorage.setItem('kanban-sort', currentSort);
   refreshCurrentView();
 });
 
 // Hide old done toggle
 document.getElementById("hide-done-btn")!.addEventListener("click", () => {
   hideOldDone = !hideOldDone;
+  localStorage.setItem('kanban-hide-old', String(hideOldDone));
   document.getElementById("hide-done-btn")!.classList.toggle("active", hideOldDone);
   applySearchFilter();
 });

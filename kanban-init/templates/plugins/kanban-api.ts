@@ -122,6 +122,12 @@ function getDb(): Database.Database {
   try {
     db.exec(`ALTER TABLE tasks ADD COLUMN notes TEXT`);
   } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN decision_log TEXT`);
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN done_when TEXT`);
+  } catch { /* column already exists */ }
 
   // Ensure images directory exists
   const imagesDir = path.resolve(path.dirname(DB_PATH), "kanban-images");
@@ -184,6 +190,8 @@ interface Task {
   level: number;
   attachments: string | null;
   notes: string | null;
+  decision_log: string | null;
+  done_when: string | null;
   created_at: string;
   started_at: string | null;
   planned_at: string | null;
@@ -431,6 +439,14 @@ export function kanbanApiPlugin(): Plugin {
             if (body.level !== undefined) {
               sets.push("level = ?");
               values.push(body.level);
+            }
+            if (body.decision_log !== undefined) {
+              sets.push("decision_log = ?");
+              values.push(body.decision_log);
+            }
+            if (body.done_when !== undefined) {
+              sets.push("done_when = ?");
+              values.push(body.done_when);
             }
 
             if (sets.length > 0) {
