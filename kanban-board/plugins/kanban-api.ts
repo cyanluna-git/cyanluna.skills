@@ -1,3 +1,4 @@
+import { spawn } from "child_process";
 import Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
@@ -942,6 +943,97 @@ export function kanbanApiPlugin(): Plugin {
           res.setHeader("Content-Type", mimeTypes[ext] || "application/octet-stream");
           res.setHeader("Cache-Control", "public, max-age=86400");
           res.end(fs.readFileSync(filePath));
+          return;
+        }
+
+        // ── Bitbucket PR Webhook ──────────────────────────────
+        const WEBHOOK_LOG_MAX = 50;
+        const webhookLog: Array<{
+          ts: string;
+          event: string;
+          repo: string;
+          prId: number;
+          prUrl: string;
+          status: string;
+        }> = (globalThis as any).__webhookLog ??= [];
+
+        if (pathname === "/api/webhook/bitbucket" && req.method === "POST") {
+          const eventKey = req.headers["x-event-key"] as string || "";
+          const body = await parseBody(req);
+
+          // Only handle PR created/updated
+          if (!eventKey.startsWith("pullrequest:")) {
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: true, skipped: true, reason: `unhandled event: ${eventKey}` }));
+            return;
+          }
+
+          const pr = body?.pullrequest;
+          const prUrl = pr?.links?.html?.href;
+          const prId = pr?.id ?? 0;
+          const repoSlug = body?.repository?.slug ?? "unknown";
+
+          if (!prUrl) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, error: "missing pullrequest.links.html.href" }));
+            return;
+          }
+
+          // Respond immediately (Bitbucket has a 10s timeout)
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, event: eventKey, prUrl }));
+
+          // Log the event
+          const entry = {
+            ts: new Date().toISOString(),
+            event: eventKey,
+            repo: repoSlug,
+            prId,
+            prUrl,
+            status: "spawned",
+          };
+          webhookLog.unshift(entry);
+          if (webhookLog.length > WEBHOOK_LOG_MAX) webhookLog.length = WEBHOOK_LOG_MAX;
+
+          // Spawn claude review in background
+          const jarvisDir = path.resolve(os.homedir(), "Dev", "jarvis.gerald");
+          console.log(`[webhook] ${eventKey} → reviewing ${prUrl}`);
+
+          const child = spawn("claude", ["-p", `/javis-review-pr ${prUrl}`], {
+            cwd: jarvisDir,
+            detached: true,
+            stdio: ["ignore", "pipe", "pipe"],
+            env: { ...process.env, HOME: os.homedir() },
+          });
+
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+          child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+          child.on("close", (code: number | null) => {
+            entry.status = code === 0 ? "done" : `exit:${code}`;
+            console.log(`[webhook] review finished (${entry.status}) for ${prUrl}`);
+            if (stderr) console.error(`[webhook] stderr: ${stderr.slice(0, 500)}`);
+            if (stdout) console.log(`[webhook] stdout (last 500): ${stdout.slice(-500)}`);
+          });
+
+          child.on("error", (err: Error) => {
+            entry.status = `error: ${err.message}`;
+            console.error(`[webhook] spawn error: ${err.message}`);
+          });
+
+          child.unref();
+          return;
+        }
+
+        // GET /api/webhook/log — recent webhook events
+        if (pathname === "/api/webhook/log" && req.method === "GET") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(webhookLog));
           return;
         }
 
