@@ -44,10 +44,11 @@
 
 ```bash
 git clone https://github.com/cyanluna/cyanluna.skills.git
-cp -R cyanluna.skills/kanban        ~/.claude/skills/
-cp -R cyanluna.skills/kanban-run    ~/.claude/skills/
-cp -R cyanluna.skills/kanban-refine ~/.claude/skills/
-cp -R cyanluna.skills/kanban-init   ~/.claude/skills/
+cp -R cyanluna.skills/kanban         ~/.claude/skills/
+cp -R cyanluna.skills/kanban-run     ~/.claude/skills/
+cp -R cyanluna.skills/kanban-refine  ~/.claude/skills/
+cp -R cyanluna.skills/kanban-init    ~/.claude/skills/
+cp -R cyanluna.skills/kanban-explore ~/.claude/skills/
 ```
 
 **2. Initialize a project** (inside any project directory)
@@ -212,6 +213,22 @@ The `done_when` field connects agents into a verification loop:
 |---------|-------------|
 | `/kanban-refine <ID>` | Refine backlog requirements through structured user interview |
 
+#### `/kanban-explore` — Codebase Exploration & Task Seeding
+
+Use when you have a vague idea but don't know how to implement it. Explores the codebase deeply, produces a direction report, then seeds the board with phased tasks. **Does not write code.**
+
+| Command | Description |
+|---------|-------------|
+| `/kanban-explore <topic>` | Explore codebase, present 2–3 implementation directions, create phased kanban tasks |
+
+**Workflow:**
+1. Launches an Explore agent to deeply analyze the codebase
+2. Produces a structured report: current state → key findings → possible directions → recommendation
+3. You choose a direction via interactive prompt
+4. Creates 3–7 phased `todo` tasks, each embedding the exploration context
+
+> Use `/kanban-refine` after exploring to add more detail to individual tasks before running the pipeline.
+
 </details>
 
 ---
@@ -235,6 +252,8 @@ The `done_when` field connects agents into a verification loop:
 │   ├── kanban-run/          # Pipeline orchestration
 │   │   └── SKILL.md
 │   ├── kanban-refine/       # Requirements refinement interview
+│   │   └── SKILL.md
+│   ├── kanban-explore/      # Codebase exploration & task seeding
 │   │   └── SKILL.md
 │   └── kanban-init/         # Project registration skill
 │       ├── SKILL.md
