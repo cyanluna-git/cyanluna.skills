@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1D4ED8"/>
+      <stop offset="100%" stop-color="#1E3A8A"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7 Z" fill="white"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" fill="url(#bg)" rx="48"/>
+
+  <!-- Top-left card (solid white) -->
+  <rect x="32" y="36" width="114" height="102" fill="white" rx="12"/>
+
+  <!-- Bottom-right card (translucent white) -->
+  <rect x="110" y="118" width="114" height="102" fill="white" opacity="0.45" rx="12"/>
+
+  <!-- Arrow: right edge of top card → top edge of bottom card -->
+  <path d="M 138 138 L 162 118" stroke="white" stroke-width="6" fill="none"
+    stroke-linecap="round" marker-end="url(#arrow)"/>
+</svg>
