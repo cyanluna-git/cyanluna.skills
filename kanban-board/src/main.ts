@@ -58,9 +58,27 @@ const STATUS_BADGES: Record<string, string> = {
   test:        "Testing",
 };
 
+interface ChronicleEvent {
+  timestamp: string;
+  type: "created"|"started"|"planned"|"reviewed"|"tested"|"completed"|"agent";
+  task: Task;
+  agentEntry?: { agent: string; model: string; message: string; timestamp: string };
+}
+
+const EVENT_TYPES: Record<string, { icon: string; label: string; cls: string }> = {
+  created:   { icon: "🌱", label: "Created",    cls: "ev-created"   },
+  started:   { icon: "🔨", label: "Started",    cls: "ev-started"   },
+  planned:   { icon: "📋", label: "Plan ready", cls: "ev-planned"   },
+  reviewed:  { icon: "🔍", label: "Reviewed",   cls: "ev-reviewed"  },
+  tested:    { icon: "🧪", label: "Tested",     cls: "ev-tested"    },
+  completed: { icon: "✅", label: "Completed",  cls: "ev-completed" },
+  agent:     { icon: "🤖", label: "Agent",      cls: "ev-agent"     },
+};
+
 let currentProject: string | null = localStorage.getItem('kanban-project');
 let isDragging = false;
-let currentView: "board" | "list" = "board";
+let currentView: "board" | "list" | "chronicle" = "board";
+let showAgentActivity: boolean = false;
 let currentSearch: string = '';
 let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
 let hideOldDone: boolean = localStorage.getItem('kanban-hide-old') === 'true';
@@ -313,7 +331,11 @@ function simpleMarkdownToHtml(md: string): string {
     return `\x00CB${codeBlocks.length - 1}\x00`;
   });
 
-  // Inline formatting
+  // Escape raw HTML outside code blocks so tags like <textarea>, <select>,
+  // <script> in task descriptions don't corrupt the modal's DOM structure.
+  text = text.replace(/</g, "&lt;");
+
+  // Inline formatting (applied after escaping — markdown markers use no HTML chars)
   text = text
     .replace(RE_BOLD, "<strong>$1</strong>")
     .replace(RE_INLINE_CODE, "<code>$1</code>");
@@ -906,6 +928,178 @@ async function showTaskDetail(id: number, project?: string) {
   }
 }
 
+// Neon/PostgreSQL returns timestamps as "YYYY-MM-DD HH:mm:ss.ffffff" (space, no T, no Z).
+// new Date() requires ISO 8601 T-separator; we normalize here.
+function parseTs(dateStr: string): Date {
+  if (!dateStr) return new Date(NaN);
+  let s = dateStr.replace(" ", "T");       // space → T
+  if (s.length === 10) s += "T00:00:00Z"; // date-only
+  else if (!/Z$|[+-]\d{2}:\d{2}$/.test(s)) s += "Z"; // append Z if no tz
+  return new Date(s);
+}
+
+function isoWeek(dateStr: string): string {
+  const d = parseTs(dateStr);
+  if (isNaN(d.getTime())) return "Unknown";
+  // ISO week: Thursday-based
+  const day = d.getUTCDay() || 7; // 1=Mon, 7=Sun
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function fmtTime(dateStr: string): string {
+  const d = parseTs(dateStr);
+  if (isNaN(d.getTime())) return dateStr.slice(0, 10) || "—";
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "UTC", hour12: false });
+  return `${date}\n${time}`;
+}
+
+function renderChronicleEvent(ev: ChronicleEvent): string {
+  const et = EVENT_TYPES[ev.type];
+  const pClass = priorityClass(ev.task.priority);
+  const projectBadge = !currentProject && ev.task.project
+    ? `<span class="badge project">${ev.task.project}</span>`
+    : "";
+  const priorityBadge = pClass
+    ? `<span class="badge ${pClass}">${ev.task.priority}</span>`
+    : "";
+
+  if (ev.type === "agent" && ev.agentEntry) {
+    const a = ev.agentEntry;
+    const summary = a.message ? a.message.slice(0, 140) + (a.message.length > 140 ? "…" : "") : "";
+    return `
+      <div class="chronicle-event ev-agent-row">
+        <div class="chronicle-dot ${et.cls}"></div>
+        <div class="chronicle-event-time">${fmtTime(ev.timestamp)}</div>
+        <div class="chronicle-event-body">
+          <span class="chronicle-event-type ${et.cls}">${et.icon} ${et.label}</span>
+          <button class="chronicle-task-link" data-id="${ev.task.id}" data-project="${ev.task.project}">
+            #${ev.task.id} ${ev.task.title}
+          </button>
+          <span class="badge agent-tag">${a.agent}</span>
+          ${a.model ? `<span class="badge level-1" style="font-size:0.6rem">${a.model}</span>` : ""}
+          ${summary ? `<span class="chronicle-agent-msg">${summary}</span>` : ""}
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="chronicle-event">
+      <div class="chronicle-dot ${et.cls}"></div>
+      <div class="chronicle-event-time">${fmtTime(ev.timestamp)}</div>
+      <div class="chronicle-event-body">
+        <span class="chronicle-event-type ${et.cls}">${et.icon} ${et.label}</span>
+        <button class="chronicle-task-link" data-id="${ev.task.id}" data-project="${ev.task.project}">
+          #${ev.task.id} ${ev.task.title}
+        </button>
+        ${priorityBadge}
+        ${projectBadge}
+      </div>
+    </div>`;
+}
+
+async function loadChronicleView() {
+  const el = document.getElementById("chronicle-view")!;
+  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
+
+  try {
+    const res = await fetch(`/api/board${params}`);
+    const data: Board = await res.json();
+
+    renderProjectFilter(data.projects);
+
+    const allTasks: Task[] = [];
+    for (const col of COLUMNS) {
+      for (const t of data[col.key as keyof Omit<Board, "projects">]) {
+        allTasks.push(t);
+      }
+    }
+
+    const TS_FIELDS: Array<{ field: keyof Task; type: ChronicleEvent["type"] }> = [
+      { field: "created_at",   type: "created"   },
+      { field: "started_at",   type: "started"   },
+      { field: "planned_at",   type: "planned"   },
+      { field: "reviewed_at",  type: "reviewed"  },
+      { field: "tested_at",    type: "tested"    },
+      { field: "completed_at", type: "completed" },
+    ];
+
+    const events: ChronicleEvent[] = [];
+
+    for (const task of allTasks) {
+      for (const { field, type } of TS_FIELDS) {
+        const ts = task[field] as string | null;
+        if (ts) {
+          events.push({ timestamp: ts, type, task });
+        }
+      }
+      if (showAgentActivity) {
+        const entries = parseJsonArray(task.agent_log);
+        for (const entry of entries) {
+          if (entry && entry.timestamp) {
+            events.push({
+              timestamp: entry.timestamp,
+              type: "agent",
+              task,
+              agentEntry: entry,
+            });
+          }
+        }
+      }
+    }
+
+    // Sort newest first
+    events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+    // Group by ISO week
+    const grouped = new Map<string, ChronicleEvent[]>();
+    for (const ev of events) {
+      const week = isoWeek(ev.timestamp);
+      if (!grouped.has(week)) grouped.set(week, []);
+      grouped.get(week)!.push(ev);
+    }
+
+    if (grouped.size === 0) {
+      el.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;color:#64748b;font-size:0.9rem;padding:64px">
+          No events yet
+        </div>`;
+      return;
+    }
+
+    const html = [...grouped.entries()].map(([week, evs]) => {
+      const evHtml = evs.map(renderChronicleEvent).join("");
+      return `
+        <div class="chronicle-group">
+          <div class="chronicle-week-header">${week}</div>
+          <div class="chronicle-events">${evHtml}</div>
+        </div>`;
+    }).join("");
+
+    el.innerHTML = `<div class="chronicle-timeline">${html}</div>`;
+
+    // Wire up task links
+    el.querySelectorAll<HTMLButtonElement>(".chronicle-task-link").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id!);
+        const project = btn.dataset.project || undefined;
+        showTaskDetail(id, project);
+      });
+    });
+
+  } catch (err) {
+    console.error("loadChronicleView failed:", err);
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;color:#ef4444;font-size:0.9rem;padding:48px">
+        Failed to load chronicle
+      </div>`;
+  }
+}
+
 async function loadBoard() {
   const board = document.getElementById("board")!;
   const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
@@ -1266,31 +1460,39 @@ fetch("/api/info")
   })
   .catch(() => {});
 
-function switchView(view: "board" | "list") {
+function switchView(view: "board" | "list" | "chronicle") {
   currentView = view;
   const boardEl = document.getElementById("board")!;
   const listEl = document.getElementById("list-view")!;
-  const tabBoard = document.getElementById("tab-board")!;
-  const tabList = document.getElementById("tab-list")!;
+  const chronicleEl = document.getElementById("chronicle-view")!;
+
+  // Hide all
+  boardEl.classList.add("hidden");
+  listEl.classList.add("hidden");
+  chronicleEl.classList.add("hidden");
+  document.getElementById("tab-board")!.classList.remove("active");
+  document.getElementById("tab-list")!.classList.remove("active");
+  document.getElementById("tab-chronicle")!.classList.remove("active");
 
   if (view === "board") {
     boardEl.classList.remove("hidden");
-    listEl.classList.add("hidden");
-    tabBoard.classList.add("active");
-    tabList.classList.remove("active");
+    document.getElementById("tab-board")!.classList.add("active");
     loadBoard();
-  } else {
-    boardEl.classList.add("hidden");
+  } else if (view === "list") {
     listEl.classList.remove("hidden");
-    tabBoard.classList.remove("active");
-    tabList.classList.add("active");
+    document.getElementById("tab-list")!.classList.add("active");
     loadListView();
+  } else {
+    chronicleEl.classList.remove("hidden");
+    document.getElementById("tab-chronicle")!.classList.add("active");
+    loadChronicleView();
   }
 }
 
 function refreshCurrentView() {
   if (currentView === "board") loadBoard();
-  else loadListView();
+  else if (currentView === "list") loadListView();
+  else loadChronicleView();
 }
 
 // Init
@@ -1305,6 +1507,12 @@ if (hideOldDone) {
 // Tab switching
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
+document.getElementById("tab-chronicle")!.addEventListener("click", () => switchView("chronicle"));
+document.getElementById("chronicle-agent-btn")!.addEventListener("click", () => {
+  showAgentActivity = !showAgentActivity;
+  document.getElementById("chronicle-agent-btn")!.classList.toggle("active", showAgentActivity);
+  if (currentView === "chronicle") loadChronicleView();
+});
 
 // Auto-refresh every 10 seconds (pause when modal is open or dragging)
 setInterval(() => {

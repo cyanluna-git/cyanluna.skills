@@ -312,17 +312,10 @@ export function kanbanApiPlugin(): Plugin {
           const id = taskMatch[1];
           const projectParam = reqUrl.searchParams.get("project");
 
-          // GET
+          // GET — look up by ID only; project param is ignored for reads
+          // (migrated tasks may have project names that differ from sanitized form)
           if (req.method === "GET") {
-            let rows: Task[];
-            if (projectParam) {
-              rows = await q<Task>(sql,
-                "SELECT * FROM tasks WHERE id = $1 AND project = $2",
-                [id, sanitizeProject(projectParam)]
-              );
-            } else {
-              rows = await q<Task>(sql, "SELECT * FROM tasks WHERE id = $1", [id]);
-            }
+            const rows = await q<Task>(sql, "SELECT * FROM tasks WHERE id = $1", [id]);
             if (!rows[0]) {
               res.statusCode = 404;
               res.end(JSON.stringify({ error: "Not found" }));
