@@ -24,7 +24,7 @@ Implementing / Plan Review / Impl Review / Testing / Recently Done / Next Todo.
 ### `/kanban add <title>` — Add Task
 
 1. Ask user for priority, level (L1/L2/L3), description, tags (use AskUserQuestion)
-2. POST to API, output confirmation with new task ID
+2. Build JSON safely with `jq` (see shared.md → JSON Safety), POST to API, output confirmation with new task ID
 
 ### `/kanban move <ID> <status>` — Move Task
 
