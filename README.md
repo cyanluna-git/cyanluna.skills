@@ -5,8 +5,9 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Claude_Code-skills-8A2BE2" alt="Claude Code Skills" />
-  <img src="https://img.shields.io/badge/version-3.0.0-green" alt="v3.0.0" />
+  <img src="https://img.shields.io/badge/version-3.1.0-green" alt="v3.1.0" />
   <img src="https://img.shields.io/badge/DB-Neon_PostgreSQL-00E599" alt="Neon PostgreSQL" />
+  <img src="https://img.shields.io/badge/Storage-Cloudflare_R2-F38020" alt="Cloudflare R2" />
 </p>
 
 ---
@@ -53,14 +54,16 @@ cp -R cyanluna.skills/kanban-explore ~/.claude/skills/
 cp -R cyanluna.skills/kanban-board   ~/.claude/kanban-board
 ```
 
-**2. Set up Neon PostgreSQL**
-
-Create a free database at [neon.tech](https://neon.tech), then add the connection string:
+**2. Set up environment**
 
 ```bash
-echo "DATABASE_URL=postgresql://..." > ~/.claude/kanban-board/.env
-cd ~/.claude/kanban-board && pnpm install
+cd ~/.claude/kanban-board
+cp .env.example .env   # fill in DATABASE_URL and optionally Cloudflare R2 vars
+pnpm install
 ```
+
+Create a free Neon database at [neon.tech](https://neon.tech) and paste the connection string as `DATABASE_URL`.
+For image attachments, set up a [Cloudflare R2](https://www.cloudflare.com/developer-platform/r2/) bucket and fill in the `CLOUDFLARE_R2_*` variables. Image uploads are disabled if these are omitted.
 
 **3. Initialize a project** (inside any project directory)
 
@@ -175,17 +178,30 @@ The `done_when` field connects agents into a verification loop:
 
 ## Web Board Features
 
+Three views accessible from the top tab bar:
+
+### Board
 - **7-column kanban** with real-time task counts
 - **Drag-and-drop** between columns (enforces valid status transitions)
 - **Card detail modal** with lifecycle progress bar, editable requirements, level selector
-- **List view** with inline status/level/priority editing
+
+### List
+- **Inline editing** of status, level, and priority without opening the modal
+
+### Chronicle (연대기)
+- **Timeline view** of every lifecycle event across all tasks, grouped by ISO week
+- 6 event types: Created · Started · Plan ready · Reviewed · Tested · Completed
+- **Agent Activity toggle** — expands `agent_log` entries into the timeline
+- Click any event row to open the full task detail modal
+
+### Common
 - **Search** by title, description, tags, or `#ID`
 - **Sort** by creation date, completion date, or default rank (persisted in localStorage)
 - **Hide old Done** toggle (3d+ threshold, persisted in localStorage)
 - **Multi-project** support — all projects on one board, or filter by project (persisted in localStorage)
 - **Copy card reference** — click to copy `#ID Title` to clipboard
 - **Notes** with markdown support
-- **Image attachments** with drag-and-drop upload
+- **Image attachments** with drag-and-drop upload (stored in Cloudflare R2)
 - **Markdown rendering** in plan, implementation notes, and reviews
 - **Mermaid diagrams** rendered inline
 - **Agent log viewer** — full chronological history of all agents per task
@@ -276,7 +292,8 @@ Use when you have a vague idea but don't know *how* to implement it. Explores th
 │       └── SKILL.md
 └── kanban-board/            # Central web board (Vite + TypeScript → Neon PostgreSQL)
     ├── plugins/kanban-api.ts
-    └── .env                 # DATABASE_URL=postgresql://...
+    ├── .env.example         # Template — copy to .env and fill in credentials
+    └── .env                 # DATABASE_URL + CLOUDFLARE_R2_* (gitignored)
 
 Neon PostgreSQL              # Centralized DB — all projects, all PCs
 └── tasks table              # `project` column isolates per-project data
