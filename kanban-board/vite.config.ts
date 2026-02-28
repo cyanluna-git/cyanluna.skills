@@ -1,5 +1,8 @@
 import { defineConfig } from "vite";
+import dotenv from "dotenv";
 import { kanbanApiPlugin } from "./plugins/kanban-api";
+
+dotenv.config();
 
 export default defineConfig({
   plugins: [kanbanApiPlugin()],
