@@ -1,7 +1,7 @@
 # Kanban Shared Context
 
-Manages project tasks in **per-project** SQLite databases at `~/.claude/kanban-dbs/{project}.db`.
-Each project gets its own DB file — no WAL conflicts when multiple PCs work on different projects simultaneously.
+Manages project tasks in **Neon PostgreSQL** via the kanban-board HTTP API.
+All projects share a single centralized DB — the kanban-board server must be running for all operations.
 
 ## DB Path & Project Config
 
@@ -10,7 +10,6 @@ Read project config from `.claude/kanban.json` (created by `/kanban-init`):
 ```bash
 CONFIG=$(cat .claude/kanban.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
-DB="$HOME/.claude/kanban-dbs/${PROJECT}.db"
 ```
 
 If `.claude/kanban.json` doesn't exist, prompt user to run `/kanban-init`, or fall back to `basename "$(pwd)"`.
@@ -53,21 +52,10 @@ test        → done (pass), impl (fail)
 done        → (terminal)
 ```
 
-## DB Access
+## API Access
 
-Priority: **HTTP API** (`http://localhost:5173`) → **sqlite3 CLI**
-
-> **IMPORTANT**: Do NOT use `python3 -c "import sqlite3..."` for DB access. Always use the `sqlite3` CLI at `/usr/bin/sqlite3`.
-
-```bash
-# Read
-sqlite3 -json ~/.claude/kanban-dbs/$PROJECT.db \
-  "SELECT id, title, status, priority FROM tasks WHERE project='$PROJECT' ORDER BY id"
-
-# Update
-sqlite3 ~/.claude/kanban-dbs/$PROJECT.db \
-  "UPDATE tasks SET status='impl', started_at=datetime('now') WHERE id=$ID"
-```
+All DB operations go through the kanban-board HTTP API (`http://localhost:5173`).
+Start the server with `./kanban-board/start.sh` before using any kanban commands.
 
 ### API Endpoints
 
@@ -121,6 +109,7 @@ curl -s -X DELETE "http://localhost:5173/api/task/$ID?project=$PROJECT"
 
 ## Error Handling
 
+- **Server not running**: Run `./kanban-board/start.sh` first
 - **Agent failure**: 1 retry on first failure; 2nd failure → keep status, log to `agent_log`, notify user
 - **Plan review loop**: `plan_review_count > 3` → circuit breaker, ask user
 - **Impl review loop**: `impl_review_count > 3` → circuit breaker, ask user

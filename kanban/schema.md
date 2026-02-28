@@ -4,7 +4,7 @@
 
 ```sql
 CREATE TABLE IF NOT EXISTS tasks (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   project TEXT NOT NULL,
   title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'todo',
@@ -26,12 +26,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   decision_log TEXT,
   done_when TEXT,
   rank INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT DEFAULT (datetime('now')),
-  started_at TEXT,
-  planned_at TEXT,
-  reviewed_at TEXT,
-  tested_at TEXT,
-  completed_at TEXT
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  started_at TIMESTAMPTZ,
+  planned_at TIMESTAMPTZ,
+  reviewed_at TIMESTAMPTZ,
+  tested_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
 );
 ```
 
@@ -165,10 +165,5 @@ Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), `MODEL
 
 ## Schema Migrations
 
-When adding new columns, use `ALTER TABLE` with a try/catch pattern to handle existing DBs:
-
-```sql
-ALTER TABLE tasks ADD COLUMN <column_name> <TYPE>;
-```
-
-The `kanban-api.ts` plugin runs migrations automatically on startup. Each migration is wrapped in a try/catch so it's safe to run on DBs that already have the column.
+New columns are added with `ADD COLUMN IF NOT EXISTS` in PostgreSQL — idempotent, no try/catch needed.
+The `kanban-api.ts` plugin runs migrations automatically on server startup.

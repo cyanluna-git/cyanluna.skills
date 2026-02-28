@@ -1,6 +1,6 @@
 ---
 name: kanban
-description: Manage project tasks in per-project kanban DBs (~/.claude/kanban-dbs/{project}.db). Supports task CRUD (add, edit, move, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /kanban-run, for requirements refinement use /kanban-refine. Run /kanban-init first to register the project.
+description: Manage project tasks in Neon PostgreSQL via kanban-board HTTP API. Supports task CRUD (add, edit, move, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /kanban-run, for requirements refinement use /kanban-refine. Run /kanban-init first to register the project.
 license: MIT
 ---
 
@@ -12,15 +12,6 @@ license: MIT
 
 ```bash
 BOARD=$(curl -s "http://localhost:5173/api/board?project=$PROJECT")
-```
-
-Fallback (no dev server):
-```bash
-sqlite3 -header -column ~/.claude/kanban-dbs/$PROJECT.db \
-  "SELECT id, title, status, priority FROM tasks WHERE project='$PROJECT' \
-   ORDER BY CASE status WHEN 'impl' THEN 0 WHEN 'impl_review' THEN 1 \
-   WHEN 'plan' THEN 2 WHEN 'plan_review' THEN 3 WHEN 'test' THEN 4 \
-   WHEN 'todo' THEN 5 WHEN 'done' THEN 6 END, id"
 ```
 
 Output: markdown table with ID, Status, Priority, Title.
@@ -52,11 +43,7 @@ Ask user which fields to modify, then PATCH via API.
 ### `/kanban remove <ID>` — Delete Task
 
 ```bash
-# API (preferred)
 curl -s -X DELETE "http://localhost:5173/api/task/$ID?project=$PROJECT"
-
-# sqlite3 fallback
-sqlite3 ~/.claude/kanban-dbs/$PROJECT.db "DELETE FROM tasks WHERE id=$ID;"
 ```
 
 ### `/kanban stats` — Statistics

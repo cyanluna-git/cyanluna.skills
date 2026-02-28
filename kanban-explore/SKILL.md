@@ -195,13 +195,6 @@ This skill explores first, reports direction, then seeds the kanban board with p
      -d "{\"description\": \"<updated description with task index>\"}"
    ```
 
-   Fallback (no dev server):
-   ```bash
-   sqlite3 ~/.claude/kanban-dbs/$PROJECT.db \
-     "INSERT INTO tasks (project, title, description, status, priority, level, tags, created_at)
-      VALUES ('$PROJECT', '...', '...', 'todo', 'high', 3, '...', datetime('now'))"
-   ```
-
 ⑥ Output final summary
 
    Print:
