@@ -10,8 +10,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Cloudflare R2 ─────────────────────────────────────────────────────────────
 let _r2: S3Client | null = null;
-const R2_BUCKET = process.env.CLOUDFLARE_R2_BUCKET_NAME || "cyanluna-kanban-images";
-const R2_PUBLIC_URL = (process.env.CLOUDFLARE_R2_PUBLIC_URL || "").replace(/\/$/, "");
+
+// All env reads are lazy (inside functions) to avoid ESM import-hoist / dotenv timing issues
+function r2Bucket(): string { return process.env.CLOUDFLARE_R2_BUCKET_NAME || "cyanluna-kanban-images"; }
+function r2PublicUrl(): string { return (process.env.CLOUDFLARE_R2_PUBLIC_URL || "").replace(/\/$/, ""); }
 
 function getR2(): S3Client {
   if (_r2) return _r2;
@@ -26,11 +28,11 @@ function getR2(): S3Client {
 }
 
 async function uploadToR2(key: string, buffer: Buffer, contentType: string): Promise<void> {
-  await getR2().send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: buffer, ContentType: contentType }));
+  await getR2().send(new PutObjectCommand({ Bucket: r2Bucket(), Key: key, Body: buffer, ContentType: contentType }));
 }
 
 async function deleteFromR2(key: string): Promise<void> {
-  try { await getR2().send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key })); } catch { /* ok */ }
+  try { await getR2().send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key })); } catch { /* ok */ }
 }
 
 type Sql = ReturnType<typeof neon>;
@@ -701,7 +703,7 @@ export function kanbanApiPlugin(): Plugin {
           await uploadToR2(safeName, buffer, contentType);
 
           const attachments = task.attachments ? JSON.parse(task.attachments) : [];
-          attachments.push({ filename: body.filename || "image.png", storedName: safeName, url: `${R2_PUBLIC_URL}/${safeName}`, size: buffer.byteLength, uploaded_at: new Date().toISOString() });
+          attachments.push({ filename: body.filename || "image.png", storedName: safeName, url: `${r2PublicUrl()}/${safeName}`, size: buffer.byteLength, uploaded_at: new Date().toISOString() });
           await sql.query("UPDATE tasks SET attachments = $1 WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
 
           res.setHeader("Content-Type", "application/json");
@@ -741,7 +743,7 @@ export function kanbanApiPlugin(): Plugin {
         if (uploadsMatch && req.method === "GET") {
           const safeName = decodeURIComponent(uploadsMatch[1]).replace(/[^a-zA-Z0-9._-]/g, "_");
           res.statusCode = 302;
-          res.setHeader("Location", `${R2_PUBLIC_URL}/${safeName}`);
+          res.setHeader("Location", `${r2PublicUrl()}/${safeName}`);
           res.end();
           return;
         }
