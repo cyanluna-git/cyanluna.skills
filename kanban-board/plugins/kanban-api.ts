@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { neon } from "@neondatabase/serverless";
-import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -8,12 +8,29 @@ import type { Plugin, ViteDevServer } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const IMAGES_DIR =
-  process.env.KANBAN_IMAGES ||
-  path.resolve(os.homedir(), ".claude", "kanban-images");
+// ── Cloudflare R2 ─────────────────────────────────────────────────────────────
+let _r2: S3Client | null = null;
+const R2_BUCKET = process.env.CLOUDFLARE_R2_BUCKET_NAME || "cyanluna-kanban-images";
+const R2_PUBLIC_URL = (process.env.CLOUDFLARE_R2_PUBLIC_URL || "").replace(/\/$/, "");
 
-if (!fs.existsSync(IMAGES_DIR)) {
-  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+function getR2(): S3Client {
+  if (_r2) return _r2;
+  const endpoint = process.env.CLOUDFLARE_R2_ENDPOINT;
+  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    throw new Error("Cloudflare R2 env vars missing (CLOUDFLARE_R2_ENDPOINT, CLOUDFLARE_R2_ACCESS_KEY_ID, CLOUDFLARE_R2_SECRET_ACCESS_KEY)");
+  }
+  _r2 = new S3Client({ region: "auto", endpoint, credentials: { accessKeyId, secretAccessKey } });
+  return _r2;
+}
+
+async function uploadToR2(key: string, buffer: Buffer, contentType: string): Promise<void> {
+  await getR2().send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: buffer, ContentType: contentType }));
+}
+
+async function deleteFromR2(key: string): Promise<void> {
+  try { await getR2().send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key })); } catch { /* ok */ }
 }
 
 type Sql = ReturnType<typeof neon>;
@@ -399,7 +416,7 @@ export function kanbanApiPlugin(): Plugin {
             if (task?.attachments) {
               try {
                 for (const a of JSON.parse(task.attachments)) {
-                  try { fs.unlinkSync(path.join(IMAGES_DIR, a.storedName)); } catch { /* ok */ }
+                  await deleteFromR2(a.storedName);
                 }
               } catch { /* ok */ }
             }
@@ -678,11 +695,13 @@ export function kanbanApiPlugin(): Plugin {
           const filename = (body.filename || "image.png").replace(/[^a-zA-Z0-9._-]/g, "_");
           const ext = path.extname(filename) || ".png";
           const safeName = `${id}_${Date.now()}${ext}`;
-          const filePath = path.resolve(IMAGES_DIR, safeName);
-          fs.writeFileSync(filePath, Buffer.from(body.data.replace(/^data:[^;]+;base64,/, ""), "base64"));
+          const mimeTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml" };
+          const contentType = mimeTypes[ext.toLowerCase()] || "application/octet-stream";
+          const buffer = Buffer.from(body.data.replace(/^data:[^;]+;base64,/, ""), "base64");
+          await uploadToR2(safeName, buffer, contentType);
 
           const attachments = task.attachments ? JSON.parse(task.attachments) : [];
-          attachments.push({ filename: body.filename || "image.png", storedName: safeName, path: filePath, url: `/api/uploads/${safeName}`, size: fs.statSync(filePath).size, uploaded_at: new Date().toISOString() });
+          attachments.push({ filename: body.filename || "image.png", storedName: safeName, url: `${R2_PUBLIC_URL}/${safeName}`, size: buffer.byteLength, uploaded_at: new Date().toISOString() });
           await sql.query("UPDATE tasks SET attachments = $1 WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
 
           res.setHeader("Content-Type", "application/json");
@@ -708,7 +727,7 @@ export function kanbanApiPlugin(): Plugin {
           const idx = attachments.findIndex((a: any) => a.storedName === storedName);
           if (idx >= 0) {
             const [removed] = attachments.splice(idx, 1);
-            try { fs.unlinkSync(path.join(IMAGES_DIR, removed.storedName)); } catch { /* ok */ }
+            await deleteFromR2(removed.storedName);
             await sql.query("UPDATE tasks SET attachments = $1 WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
           }
 
@@ -717,17 +736,13 @@ export function kanbanApiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/uploads/:filename
+        // GET /api/uploads/:filename — redirect to R2 public URL
         const uploadsMatch = pathname.match(/^\/api\/uploads\/([^/]+)$/);
         if (uploadsMatch && req.method === "GET") {
           const safeName = decodeURIComponent(uploadsMatch[1]).replace(/[^a-zA-Z0-9._-]/g, "_");
-          const filePath = path.resolve(IMAGES_DIR, safeName);
-          if (!filePath.startsWith(IMAGES_DIR)) { res.statusCode = 403; res.end(JSON.stringify({ error: "Forbidden" })); return; }
-          if (!fs.existsSync(filePath)) { res.statusCode = 404; res.end(JSON.stringify({ error: "Not found" })); return; }
-          const mimeTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml" };
-          res.setHeader("Content-Type", mimeTypes[path.extname(safeName).toLowerCase()] || "application/octet-stream");
-          res.setHeader("Cache-Control", "public, max-age=86400");
-          res.end(fs.readFileSync(filePath));
+          res.statusCode = 302;
+          res.setHeader("Location", `${R2_PUBLIC_URL}/${safeName}`);
+          res.end();
           return;
         }
 
