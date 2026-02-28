@@ -5,7 +5,8 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Claude_Code-skills-8A2BE2" alt="Claude Code Skills" />
-  <img src="https://img.shields.io/badge/version-2.1.0-green" alt="v2.1.0" />
+  <img src="https://img.shields.io/badge/version-3.0.0-green" alt="v3.0.0" />
+  <img src="https://img.shields.io/badge/DB-Neon_PostgreSQL-00E599" alt="Neon PostgreSQL" />
 </p>
 
 ---
@@ -49,17 +50,28 @@ cp -R cyanluna.skills/kanban-run     ~/.claude/skills/
 cp -R cyanluna.skills/kanban-refine  ~/.claude/skills/
 cp -R cyanluna.skills/kanban-init    ~/.claude/skills/
 cp -R cyanluna.skills/kanban-explore ~/.claude/skills/
+cp -R cyanluna.skills/kanban-board   ~/.claude/kanban-board
 ```
 
-**2. Initialize a project** (inside any project directory)
+**2. Set up Neon PostgreSQL**
+
+Create a free database at [neon.tech](https://neon.tech), then add the connection string:
+
+```bash
+echo "DATABASE_URL=postgresql://..." > ~/.claude/kanban-board/.env
+cd ~/.claude/kanban-board && pnpm install
+```
+
+**3. Initialize a project** (inside any project directory)
 
 ```
 /kanban-init
 ```
 
-This creates `.claude/kanban.json`, a per-project SQLite DB at `~/.claude/kanban-dbs/{project}.db`, and a `kanban-board/start.sh` launcher.
+This creates `.claude/kanban.json` and a `kanban-board/start.sh` launcher.
+Project data is stored in Neon under a `project` column — no local DB files needed.
 
-**3. Start the board and add tasks**
+**4. Start the board and add tasks**
 
 ```bash
 ./kanban-board/start.sh        # opens http://localhost:5173
@@ -245,8 +257,8 @@ Use when you have a vague idea but don't know *how* to implement it. Explores th
 ├── skills/
 │   ├── kanban/              # CRUD & board (SKILL.md + shared context + schema + templates)
 │   │   ├── SKILL.md
-│   │   ├── shared.md        # Shared context (DB, pipeline, API, error handling)
-│   │   ├── schema.md
+│   │   ├── shared.md        # Shared context (pipeline, API endpoints, error handling)
+│   │   ├── schema.md        # PostgreSQL schema & JSON field formats
 │   │   └── templates/       # Agent prompt templates
 │   │       ├── plan-agent.md
 │   │       ├── review-agent.md
@@ -261,34 +273,29 @@ Use when you have a vague idea but don't know *how* to implement it. Explores th
 │   ├── kanban-explore/      # Codebase exploration & task seeding
 │   │   └── SKILL.md
 │   └── kanban-init/         # Project registration skill
-│       ├── SKILL.md
-│       └── onedrive-setup.md
-├── kanban-board/            # Central web board (Vite + TypeScript)
-│   └── ...
-└── kanban-dbs/              # Per-project SQLite databases
-    ├── my-project.db
-    ├── another-project.db
-    └── ...
+│       └── SKILL.md
+└── kanban-board/            # Central web board (Vite + TypeScript → Neon PostgreSQL)
+    ├── plugins/kanban-api.ts
+    └── .env                 # DATABASE_URL=postgresql://...
+
+Neon PostgreSQL              # Centralized DB — all projects, all PCs
+└── tasks table              # `project` column isolates per-project data
 
 <project>/
 ├── .claude/kanban.json      # Project config {"project": "my-project"}
-└── kanban-board/start.sh    # Launcher script
+└── kanban-board/start.sh    # Launcher: pnpm --dir ~/.claude/kanban-board dev
 ```
 
-Each project gets its own `.db` file — no WAL conflicts when working on multiple projects simultaneously.
+All task data lives in Neon — accessible from any machine without file sync.
 
 ---
 
 ## Cross-PC Sync
 
-Symlink `~/.claude/kanban-dbs/` to a OneDrive folder for cross-PC sync (macOS + WSL):
+Task data is stored in **Neon PostgreSQL** — sync across PCs is built-in.
+Any machine with the `DATABASE_URL` and the kanban-board running sees the same data instantly.
 
-```
-macOS  ~/.claude/kanban-dbs → ~/Library/CloudStorage/OneDrive-Personal/dev/ai-kanban/dbs/
-WSL    ~/.claude/kanban-dbs → /mnt/c/Users/{user}/OneDrive/dev/ai-kanban/dbs/
-```
-
-Different physical paths, same OneDrive folder. See [`kanban-init/onedrive-setup.md`](kanban-init/onedrive-setup.md) for full setup instructions.
+No OneDrive, no symlinks, no WAL conflicts.
 
 ---
 
