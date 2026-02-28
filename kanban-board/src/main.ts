@@ -58,27 +58,9 @@ const STATUS_BADGES: Record<string, string> = {
   test:        "Testing",
 };
 
-interface ChronicleEvent {
-  timestamp: string;
-  type: "created"|"started"|"planned"|"reviewed"|"tested"|"completed"|"agent";
-  task: Task;
-  agentEntry?: { agent: string; model: string; message: string; timestamp: string };
-}
-
-const EVENT_TYPES: Record<string, { icon: string; label: string; cls: string }> = {
-  created:   { icon: "🌱", label: "Created",    cls: "ev-created"   },
-  started:   { icon: "🔨", label: "Started",    cls: "ev-started"   },
-  planned:   { icon: "📋", label: "Plan ready", cls: "ev-planned"   },
-  reviewed:  { icon: "🔍", label: "Reviewed",   cls: "ev-reviewed"  },
-  tested:    { icon: "🧪", label: "Tested",     cls: "ev-tested"    },
-  completed: { icon: "✅", label: "Completed",  cls: "ev-completed" },
-  agent:     { icon: "🤖", label: "Agent",      cls: "ev-agent"     },
-};
-
 let currentProject: string | null = localStorage.getItem('kanban-project');
 let isDragging = false;
 let currentView: "board" | "list" | "chronicle" = "board";
-let showAgentActivity: boolean = false;
 let currentSearch: string = '';
 let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
 let hideOldDone: boolean = localStorage.getItem('kanban-hide-old') === 'true';
@@ -957,43 +939,22 @@ function fmtTime(dateStr: string): string {
   return `${date}\n${time}`;
 }
 
-function renderChronicleEvent(ev: ChronicleEvent): string {
-  const et = EVENT_TYPES[ev.type];
-  const pClass = priorityClass(ev.task.priority);
-  const projectBadge = !currentProject && ev.task.project
-    ? `<span class="badge project">${ev.task.project}</span>`
+function renderCompletedTask(task: Task): string {
+  const pClass = priorityClass(task.priority);
+  const projectBadge = !currentProject && task.project
+    ? `<span class="badge project">${task.project}</span>`
     : "";
   const priorityBadge = pClass
-    ? `<span class="badge ${pClass}">${ev.task.priority}</span>`
+    ? `<span class="badge ${pClass}">${task.priority}</span>`
     : "";
-
-  if (ev.type === "agent" && ev.agentEntry) {
-    const a = ev.agentEntry;
-    const summary = a.message ? a.message.slice(0, 140) + (a.message.length > 140 ? "…" : "") : "";
-    return `
-      <div class="chronicle-event ev-agent-row">
-        <div class="chronicle-dot ${et.cls}"></div>
-        <div class="chronicle-event-time">${fmtTime(ev.timestamp)}</div>
-        <div class="chronicle-event-body">
-          <span class="chronicle-event-type ${et.cls}">${et.icon} ${et.label}</span>
-          <button class="chronicle-task-link" data-id="${ev.task.id}" data-project="${ev.task.project}">
-            #${ev.task.id} ${ev.task.title}
-          </button>
-          <span class="badge agent-tag">${a.agent}</span>
-          ${a.model ? `<span class="badge level-1" style="font-size:0.6rem">${a.model}</span>` : ""}
-          ${summary ? `<span class="chronicle-agent-msg">${summary}</span>` : ""}
-        </div>
-      </div>`;
-  }
 
   return `
     <div class="chronicle-event">
-      <div class="chronicle-dot ${et.cls}"></div>
-      <div class="chronicle-event-time">${fmtTime(ev.timestamp)}</div>
+      <div class="chronicle-dot ev-completed"></div>
+      <div class="chronicle-event-time">${fmtTime(task.completed_at!)}</div>
       <div class="chronicle-event-body">
-        <span class="chronicle-event-type ${et.cls}">${et.icon} ${et.label}</span>
-        <button class="chronicle-task-link" data-id="${ev.task.id}" data-project="${ev.task.project}">
-          #${ev.task.id} ${ev.task.title}
+        <button class="chronicle-task-link" data-id="${task.id}" data-project="${task.project}">
+          #${task.id} ${task.title}
         </button>
         ${priorityBadge}
         ${projectBadge}
@@ -1018,60 +979,29 @@ async function loadChronicleView() {
       }
     }
 
-    const TS_FIELDS: Array<{ field: keyof Task; type: ChronicleEvent["type"] }> = [
-      { field: "created_at",   type: "created"   },
-      { field: "started_at",   type: "started"   },
-      { field: "planned_at",   type: "planned"   },
-      { field: "reviewed_at",  type: "reviewed"  },
-      { field: "tested_at",    type: "tested"    },
-      { field: "completed_at", type: "completed" },
-    ];
-
-    const events: ChronicleEvent[] = [];
-
-    for (const task of allTasks) {
-      for (const { field, type } of TS_FIELDS) {
-        const ts = task[field] as string | null;
-        if (ts) {
-          events.push({ timestamp: ts, type, task });
-        }
-      }
-      if (showAgentActivity) {
-        const entries = parseJsonArray(task.agent_log);
-        for (const entry of entries) {
-          if (entry && entry.timestamp) {
-            events.push({
-              timestamp: entry.timestamp,
-              type: "agent",
-              task,
-              agentEntry: entry,
-            });
-          }
-        }
-      }
-    }
-
-    // Sort newest first
-    events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    // Only completed tasks, sorted newest first
+    const completed = allTasks
+      .filter(t => !!t.completed_at)
+      .sort((a, b) => b.completed_at!.localeCompare(a.completed_at!));
 
     // Group by ISO week
-    const grouped = new Map<string, ChronicleEvent[]>();
-    for (const ev of events) {
-      const week = isoWeek(ev.timestamp);
+    const grouped = new Map<string, Task[]>();
+    for (const task of completed) {
+      const week = isoWeek(task.completed_at!);
       if (!grouped.has(week)) grouped.set(week, []);
-      grouped.get(week)!.push(ev);
+      grouped.get(week)!.push(task);
     }
 
     if (grouped.size === 0) {
       el.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;color:#64748b;font-size:0.9rem;padding:64px">
-          No events yet
+          No completed tasks yet
         </div>`;
       return;
     }
 
-    const html = [...grouped.entries()].map(([week, evs]) => {
-      const evHtml = evs.map(renderChronicleEvent).join("");
+    const html = [...grouped.entries()].map(([week, tasks]) => {
+      const evHtml = tasks.map(renderCompletedTask).join("");
       return `
         <div class="chronicle-group">
           <div class="chronicle-week-header">${week}</div>
@@ -1508,11 +1438,6 @@ if (hideOldDone) {
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
 document.getElementById("tab-chronicle")!.addEventListener("click", () => switchView("chronicle"));
-document.getElementById("chronicle-agent-btn")!.addEventListener("click", () => {
-  showAgentActivity = !showAgentActivity;
-  document.getElementById("chronicle-agent-btn")!.classList.toggle("active", showAgentActivity);
-  if (currentView === "chronicle") loadChronicleView();
-});
 
 // Auto-refresh every 10 seconds (pause when modal is open or dragging)
 setInterval(() => {
