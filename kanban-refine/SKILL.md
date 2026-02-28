@@ -4,7 +4,7 @@ description: Refine backlog requirements through structured user interview. Turn
 license: MIT
 ---
 
-> Shared context: read `~/.claude/skills/kanban/shared.md` for DB path, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Shared context: read `~/.claude/skills/kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 
 ## `/kanban-refine <ID>` — Refine Backlog Requirements
 

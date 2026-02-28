@@ -4,7 +4,7 @@ description: Run the AI team pipeline for kanban tasks — orchestration loop wi
 license: MIT
 ---
 
-> Shared context: read `~/.claude/skills/kanban/shared.md` for DB path, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Shared context: read `~/.claude/skills/kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 > Schema: read `~/.claude/skills/kanban/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## Commands
