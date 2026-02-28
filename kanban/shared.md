@@ -107,9 +107,32 @@ curl -s -X DELETE "http://localhost:5173/api/task/$ID?project=$PROJECT"
 
 > For full schema, column descriptions, and JSON field formats, read `~/.claude/skills/kanban/schema.md`.
 
+## JSON Safety in curl
+
+When passing user-supplied text (titles, descriptions) to curl, use `jq` or Python to build the JSON — never embed raw text in shell strings, as literal newlines and quotes break JSON:
+
+```bash
+# Safe: use jq
+PAYLOAD=$(jq -n \
+  --arg title "$TITLE" \
+  --arg project "$PROJECT" \
+  --arg description "$DESCRIPTION" \
+  --argjson level 2 \
+  '{title: $title, project: $project, priority: "medium", level: $level, description: $description}')
+curl -s -X POST http://localhost:5173/api/task \
+  -H 'Content-Type: application/json' \
+  -d "$PAYLOAD"
+```
+
+Or use Python `json.dumps()` to serialize the body safely.
+
 ## Error Handling
 
-- **Server not running**: Run `./kanban-board/start.sh` first
+> **CRITICAL: If the API call fails, NEVER fall back to SQLite or any direct DB access.**
+> The kanban DB is Neon PostgreSQL — there is no local SQLite file. Fix the API call and retry.
+
+- **Server not running**: Run `./kanban-board/start.sh` first and retry
+- **API error**: Debug the request (check JSON validity, PROJECT variable) — do NOT bypass the API
 - **Agent failure**: 1 retry on first failure; 2nd failure → keep status, log to `agent_log`, notify user
 - **Plan review loop**: `plan_review_count > 3` → circuit breaker, ask user
 - **Impl review loop**: `impl_review_count > 3` → circuit breaker, ask user
