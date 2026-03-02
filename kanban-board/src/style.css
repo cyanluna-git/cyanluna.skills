@@ -794,6 +794,67 @@ main#board.hidden {
   color: #e2e8f0;
   border-color: #60a5fa;
 }
+.phase-expand-btn {
+  background: none;
+  border: 1px solid #334155;
+  color: #64748b;
+  font-size: 0.75rem;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+/* Push to right when no preceding auto-margin element */
+.phase-label + .phase-expand-btn {
+  margin-left: auto;
+}
+.phase-expand-btn:hover {
+  color: #e2e8f0;
+  border-color: #60a5fa;
+}
+/* Fullscreen mode */
+.lifecycle-phase:fullscreen,
+.lifecycle-phase:-webkit-full-screen {
+  background: #1e293b;
+  overflow-y: auto;
+  border: none;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lifecycle-phase:fullscreen .phase-header,
+.lifecycle-phase:-webkit-full-screen .phase-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 16px 32px;
+  background: #0f172a;
+  border-bottom: 1px solid #334155;
+}
+.lifecycle-phase:fullscreen .phase-body,
+.lifecycle-phase:-webkit-full-screen .phase-body {
+  font-size: 1rem;
+  line-height: 1.75;
+  padding: 32px;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+.lifecycle-phase:fullscreen .phase-body pre,
+.lifecycle-phase:-webkit-full-screen .phase-body pre {
+  font-size: 0.875rem;
+}
+.lifecycle-phase:fullscreen .phase-body svg,
+.lifecycle-phase:-webkit-full-screen .phase-body svg {
+  max-width: 100%;
+  height: auto;
+}
 .phase-body.hidden {
   display: none;
 }
