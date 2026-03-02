@@ -449,6 +449,7 @@ function renderLifecycleSection(
       <div class="phase-header">
         <span class="phase-icon">${icon}</span>
         <span class="phase-label">${phase}</span>
+        <button class="phase-expand-btn" title="Expand to full screen">&#x26F6;</button>
       </div>
       <div class="phase-body">${body}</div>
     </div>
@@ -592,6 +593,7 @@ async function showTaskDetail(id: number, project?: string) {
           <span class="phase-label">Requirements</span>
           <select class="level-select" id="level-select" title="Pipeline Level">${levelOptions}</select>
           <button class="phase-edit-btn" id="req-edit-btn" title="Edit">&#9998;</button>
+          <button class="phase-expand-btn" title="Expand to full screen">&#x26F6;</button>
         </div>
         <div class="phase-body" id="req-body-view">
           ${reqBody}
@@ -647,6 +649,7 @@ async function showTaskDetail(id: number, project?: string) {
             <span class="phase-icon">\u{1F50D}</span>
             <span class="phase-label">Plan Review</span>
             ${task.plan_review_count > 0 ? `<span class="review-count">${task.plan_review_count} review(s)</span>` : ''}
+            <button class="phase-expand-btn" title="Expand to full screen">&#x26F6;</button>
           </div>
           <div class="phase-body">${planReviewContent || '<span class="phase-empty">Awaiting plan review</span>'}</div>
         </div>
@@ -670,6 +673,7 @@ async function showTaskDetail(id: number, project?: string) {
             <span class="phase-icon">\u{1F4DD}</span>
             <span class="phase-label">Implementation Review</span>
             ${task.impl_review_count > 0 ? `<span class="review-count">${task.impl_review_count} review(s)</span>` : ''}
+            <button class="phase-expand-btn" title="Expand to full screen">&#x26F6;</button>
           </div>
           <div class="phase-body">${reviewContent || '<span class="phase-empty">Awaiting implementation review</span>'}</div>
         </div>
@@ -686,6 +690,7 @@ async function showTaskDetail(id: number, project?: string) {
           <div class="phase-header">
             <span class="phase-icon">\u{1F9EA}</span>
             <span class="phase-label">Test Results</span>
+            <button class="phase-expand-btn" title="Expand to full screen">&#x26F6;</button>
           </div>
           <div class="phase-body">${testContent || '<span class="phase-empty">Awaiting test execution</span>'}</div>
         </div>
@@ -790,6 +795,15 @@ async function showTaskDetail(id: number, project?: string) {
 
     // Render mermaid diagrams in modal
     renderMermaidDiagrams(content);
+
+    // Fullscreen expand for phase panels
+    content.querySelectorAll<HTMLElement>('.phase-expand-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const phase = btn.closest<HTMLElement>('.lifecycle-phase');
+        phase?.requestFullscreen().catch(() => {});
+      });
+    });
 
     // Level change handler
     const levelSelect = document.getElementById("level-select") as HTMLSelectElement;
