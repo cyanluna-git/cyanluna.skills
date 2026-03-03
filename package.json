@@ -12,5 +12,8 @@
   "packageManager": "pnpm@10.28.2",
   "devDependencies": {
     "@playwright/test": "^1.58.2"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2"
   }
 }

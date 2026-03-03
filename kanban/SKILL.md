@@ -11,7 +11,7 @@ license: MIT
 ### `/kanban` or `/kanban list` — View Board
 
 ```bash
-BOARD=$(curl -s "http://localhost:5173/api/board?project=$PROJECT")
+BOARD=$(curl -s "http://localhost:5173/api/board?project=$PROJECT&summary=true")
 ```
 
 Output: markdown table with ID, Status, Priority, Title.
@@ -20,6 +20,10 @@ Output: markdown table with ID, Status, Priority, Title.
 
 **Run first when starting a new session.** Fetch board and output pipeline state:
 Implementing / Plan Review / Impl Review / Testing / Recently Done / Next Todo.
+
+```bash
+BOARD=$(curl -s "http://localhost:5173/api/board?project=$PROJECT&summary=true")
+```
 
 ### `/kanban add <title>` — Add Task
 
@@ -49,7 +53,7 @@ curl -s -X DELETE "http://localhost:5173/api/task/$ID?project=$PROJECT"
 ### `/kanban stats` — Statistics
 
 ```bash
-BOARD=$(curl -s "http://localhost:5173/api/board?project=$PROJECT")
+BOARD=$(curl -s "http://localhost:5173/api/board?project=$PROJECT&summary=true")
 echo "$BOARD" | jq '{
   todo: (.todo | length), plan: (.plan | length),
   plan_review: (.plan_review | length), impl: (.impl | length),

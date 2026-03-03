@@ -60,11 +60,17 @@ Start the server with `./kanban-board/start.sh` before using any kanban commands
 ### API Endpoints
 
 ```bash
-# Board
+# Board — full (web UI, task detail views)
 curl -s "http://localhost:5173/api/board?project=$PROJECT"
 
-# Read task
+# Board — summary (list/stats/context — excludes large TEXT fields)
+curl -s "http://localhost:5173/api/board?project=$PROJECT&summary=true"
+
+# Read task — full
 curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT"
+
+# Read task — agent-specific fields only (always includes id, project, status)
+curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT&fields=title,description,plan"
 
 # Update task fields / status
 curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
@@ -152,5 +158,5 @@ The `agent_log` accumulates the full chronological history of all agents who tou
 | `Builder` | `description`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` | (none) |
 | `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) | `impl_review` |
 | `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` | `test` or `impl` |
-| `Ranger` | `implementation_notes` | `test_results` | `done` or `impl` |
+| `Ranger` | `title`, `implementation_notes` | `test_results` | `done` or `impl` |
 | All agents | — | append signed entry to `agent_log` | — |
