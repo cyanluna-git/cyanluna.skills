@@ -44,8 +44,8 @@ Read the task's `level` field first to determine which steps to execute.
 #### Implementation
 
 ```bash
-# 1. Read current task state
-TASK=$(curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT")
+# 1. Read current task state (status + level only)
+TASK=$(curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT&fields=status,level")
 STATUS=$(echo "$TASK" | jq -r '.status')
 
 # 2. Dispatch agent (see Agent Dispatch below)
@@ -81,12 +81,34 @@ Template files are at `~/.claude/skills/kanban/templates/`.
 | `impl_review` | `templates/code-review-agent.md` | `Inspector` | `sonnet` |
 | `test` | `templates/test-runner.md` | `Ranger` | `sonnet` |
 
+**Agent minimum fields (fetch only what each agent needs):**
+
+| Nickname | Required Fields |
+|----------|----------------|
+| `Planner` | `title,description` |
+| `Critic` | `title,description,plan,decision_log,done_when` |
+| `Builder` | `title,description,plan,done_when,plan_review_comments` |
+| `Shield` | `title,description,implementation_notes` |
+| `Inspector` | `title,description,plan,done_when,implementation_notes` |
+| `Ranger` | `title,implementation_notes` |
+
 **Dispatch procedure — execute in this order for every agent:**
 
 ```
-① Read task fields
-   TASK = curl GET /api/task/$ID?project=$PROJECT
-   Extract: title, description, plan, implementation_notes, plan_review_comments, done_when
+① Read task fields (use per-agent fields to minimize token usage)
+   # Planner
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description
+   # Critic
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,decision_log,done_when
+   # Builder
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,done_when,plan_review_comments
+   # Shield
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,implementation_notes
+   # Inspector
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,done_when,implementation_notes
+   # Ranger
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,implementation_notes
+   Extract only the fields listed above for each agent
 
 ② Mark agent as active
    curl PATCH /api/task/$ID  →  { "current_agent": "<Nickname>" }

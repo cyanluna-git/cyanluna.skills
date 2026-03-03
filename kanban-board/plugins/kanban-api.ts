@@ -265,9 +265,15 @@ export function kanbanApiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/board?project=xxx
+        // GET /api/board?project=xxx[&summary=true]
         if (pathname === "/api/board") {
           const projectParam = reqUrl.searchParams.get("project");
+          const summary = reqUrl.searchParams.get("summary") === "true";
+          const fields = summary
+            ? `id, project, title, status, priority, level, current_agent,
+               plan_review_count, impl_review_count, rank, tags,
+               created_at, completed_at`
+            : `*`;
 
           const projectRows = await q<{ project: string }>(sql,
             "SELECT DISTINCT project FROM tasks ORDER BY project"
@@ -278,10 +284,10 @@ export function kanbanApiPlugin(): Plugin {
           if (projectParam) {
             const safe = sanitizeProject(projectParam);
             tasks = await q<Task>(sql,
-              "SELECT * FROM tasks WHERE project = $1 ORDER BY rank, id", [safe]
+              `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank, id`, [safe]
             );
           } else {
-            tasks = await q<Task>(sql, "SELECT * FROM tasks ORDER BY rank, id");
+            tasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank, id`);
           }
 
           const grouped = new Map<string, Task[]>();
@@ -315,7 +321,21 @@ export function kanbanApiPlugin(): Plugin {
           // GET — look up by ID only; project param is ignored for reads
           // (migrated tasks may have project names that differ from sanitized form)
           if (req.method === "GET") {
-            const rows = await q<Task>(sql, "SELECT * FROM tasks WHERE id = $1", [id]);
+            const ALLOWED_FIELDS = new Set([
+              "id","project","title","status","priority","description","plan",
+              "implementation_notes","tags","review_comments","plan_review_comments",
+              "test_results","agent_log","current_agent","plan_review_count",
+              "impl_review_count","level","attachments","notes","decision_log",
+              "done_when","rank","created_at","started_at","planned_at",
+              "reviewed_at","tested_at","completed_at",
+            ]);
+            const fieldsParam = reqUrl.searchParams.get("fields");
+            const fields = fieldsParam
+              ? ["id", "project", "status",
+                  ...fieldsParam.split(",").map(f => f.trim()).filter(f => ALLOWED_FIELDS.has(f))
+                ].filter((f, i, a) => a.indexOf(f) === i).join(", ")
+              : "*";
+            const rows = await q<Task>(sql, `SELECT ${fields} FROM tasks WHERE id = $1`, [id]);
             if (!rows[0]) {
               res.statusCode = 404;
               res.end(JSON.stringify({ error: "Not found" }));
