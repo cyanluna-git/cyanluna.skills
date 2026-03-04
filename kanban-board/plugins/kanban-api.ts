@@ -80,6 +80,16 @@ function sanitizeProject(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+// ── SSE broadcast ─────────────────────────────────────────────────────────────
+const sseClients = new Set<import("http").ServerResponse>();
+
+function broadcast() {
+  for (const res of sseClients) {
+    try { res.write("data: refresh\n\n"); }
+    catch { sseClients.delete(res); }
+  }
+}
+
 let _sql: Sql | null = null;
 let _schemaReady: Promise<void> | null = null;
 
@@ -257,6 +267,22 @@ export function kanbanApiPlugin(): Plugin {
           await ensureSchema(sql);
         }
 
+        // GET /api/events — SSE stream
+        if (pathname === "/api/events" && req.method === "GET") {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Connection", "keep-alive");
+          res.writeHead(200);
+          res.write(": connected\n\n");
+          sseClients.add(res);
+          const keepAlive = setInterval(() => {
+            try { res.write(": ping\n\n"); }
+            catch { clearInterval(keepAlive); sseClients.delete(res); }
+          }, 30000);
+          req.on("close", () => { clearInterval(keepAlive); sseClients.delete(res); });
+          return;
+        }
+
         // GET /api/info
         if (pathname === "/api/info") {
           const projectName = path.basename(path.resolve(__dirname, "..", ".."));
@@ -272,7 +298,9 @@ export function kanbanApiPlugin(): Plugin {
           const fields = summary
             ? `id, project, title, status, priority, level, current_agent,
                plan_review_count, impl_review_count, rank, tags,
-               created_at, completed_at`
+               created_at, completed_at,
+               LEFT(description, 80) AS description,
+               review_comments, plan_review_comments, notes`
             : `*`;
 
           const projectRows = await q<{ project: string }>(sql,
@@ -413,6 +441,7 @@ export function kanbanApiPlugin(): Plugin {
             }
 
             res.setHeader("Content-Type", "application/json");
+            broadcast();
             res.end(JSON.stringify({ success: true }));
             return;
           }
@@ -437,6 +466,7 @@ export function kanbanApiPlugin(): Plugin {
             }
             await sql.query("DELETE FROM tasks WHERE id = $1 AND project = $2", [id, safe]);
             res.setHeader("Content-Type", "application/json");
+            broadcast();
             res.end(JSON.stringify({ success: true }));
             return;
           }
@@ -517,6 +547,7 @@ export function kanbanApiPlugin(): Plugin {
           await sql.query("UPDATE tasks SET rank = $1 WHERE id = $2", [newRank, id]);
 
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true, rank: newRank }));
           return;
         }
@@ -550,6 +581,7 @@ export function kanbanApiPlugin(): Plugin {
           );
 
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true, id: row.id }));
           return;
         }
@@ -581,6 +613,7 @@ export function kanbanApiPlugin(): Plugin {
           await sql.query(updateQ + " WHERE id = $4 AND project = $5", [...vals, id, safe]);
 
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true, newStatus, comment: newComment }));
           return;
         }
@@ -610,6 +643,7 @@ export function kanbanApiPlugin(): Plugin {
           );
 
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true, newStatus, comment: newComment }));
           return;
         }
@@ -638,6 +672,7 @@ export function kanbanApiPlugin(): Plugin {
           await sql.query(updateQ + " WHERE id = $3 AND project = $4", [JSON.stringify(results), newStatus, id, safe]);
 
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true, newStatus, result: newResult }));
           return;
         }
@@ -662,6 +697,7 @@ export function kanbanApiPlugin(): Plugin {
 
           await sql.query("UPDATE tasks SET notes = $1 WHERE id = $2 AND project = $3", [JSON.stringify(notes), id, safe]);
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true, note }));
           return;
         }
@@ -683,6 +719,7 @@ export function kanbanApiPlugin(): Plugin {
           const notes = (task.notes ? JSON.parse(task.notes) : []).filter((n: any) => n.id !== noteId);
           await sql.query("UPDATE tasks SET notes = $1 WHERE id = $2 AND project = $3", [JSON.stringify(notes), id, safe]);
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true }));
           return;
         }
@@ -720,6 +757,7 @@ export function kanbanApiPlugin(): Plugin {
           await sql.query("UPDATE tasks SET attachments = $1 WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
 
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true, attachment: attachments[attachments.length - 1] }));
           return;
         }
@@ -747,6 +785,7 @@ export function kanbanApiPlugin(): Plugin {
           }
 
           res.setHeader("Content-Type", "application/json");
+          broadcast();
           res.end(JSON.stringify({ success: true }));
           return;
         }
