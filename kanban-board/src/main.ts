@@ -978,7 +978,9 @@ function renderCompletedTask(task: Task): string {
 
 async function loadChronicleView() {
   const el = document.getElementById("chronicle-view")!;
-  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
+  const params = currentProject
+    ? `?project=${encodeURIComponent(currentProject)}&summary=true`
+    : "?summary=true";
 
   try {
     const res = await fetch(`/api/board${params}`);
@@ -1046,7 +1048,9 @@ async function loadChronicleView() {
 
 async function loadBoard() {
   const board = document.getElementById("board")!;
-  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
+  const params = currentProject
+    ? `?project=${encodeURIComponent(currentProject)}&summary=true`
+    : "?summary=true";
 
   try {
     const res = await fetch(`/api/board${params}`);
@@ -1109,7 +1113,9 @@ async function loadBoard() {
 
 async function loadListView() {
   const listView = document.getElementById("list-view")!;
-  const params = currentProject ? `?project=${encodeURIComponent(currentProject)}` : "";
+  const params = currentProject
+    ? `?project=${encodeURIComponent(currentProject)}&summary=true`
+    : "?summary=true";
 
   try {
     const res = await fetch(`/api/board${params}`);
@@ -1453,15 +1459,18 @@ document.getElementById("tab-board")!.addEventListener("click", () => switchView
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
 document.getElementById("tab-chronicle")!.addEventListener("click", () => switchView("chronicle"));
 
-// Auto-refresh every 10 seconds (pause when modal is open or dragging)
-setInterval(() => {
-  if (isDragging) return;
-  const detailOpen = !document.getElementById("modal-overlay")!.classList.contains("hidden");
-  const addOpen = !document.getElementById("add-card-overlay")!.classList.contains("hidden");
-  if (!detailOpen && !addOpen) {
-    refreshCurrentView();
-  }
-}, 10000);
+// SSE: server pushes refresh events on any data mutation
+function connectSSE() {
+  const es = new EventSource("/api/events");
+  es.onmessage = () => {
+    if (isDragging) return;
+    const detailOpen = !document.getElementById("modal-overlay")!.classList.contains("hidden");
+    const addOpen = !document.getElementById("add-card-overlay")!.classList.contains("hidden");
+    if (!detailOpen && !addOpen) refreshCurrentView();
+  };
+  es.onerror = () => { es.close(); setTimeout(connectSSE, 5000); };
+}
+connectSSE();
 
 // Refresh button
 document.getElementById("refresh-btn")!.addEventListener("click", refreshCurrentView);
