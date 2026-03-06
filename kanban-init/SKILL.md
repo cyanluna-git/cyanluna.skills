@@ -1,6 +1,6 @@
 ---
 name: kanban-init
-description: Register and initialize the current project in Neon PostgreSQL kanban. Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init.
+description: "Register and initialize the current project in Neon PostgreSQL kanban. Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init."
 license: MIT
 ---
 
@@ -32,7 +32,9 @@ PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
 
 ### 2. Write local project config
 
-Create `.claude/kanban.json` in the **current project root**:
+Create both config files in the **current project root**:
+- `.claude/kanban.json`
+- `.codex/kanban.json`
 
 ```json
 {
@@ -40,7 +42,7 @@ Create `.claude/kanban.json` in the **current project root**:
 }
 ```
 
-Use the Write tool to create this file at `.claude/kanban.json`.
+Use the Write tool to create both files with the same content.
 
 ### 3. Create `kanban-board/start.sh`
 
@@ -51,7 +53,15 @@ mkdir -p kanban-board
 Write `kanban-board/start.sh`:
 ```bash
 #!/usr/bin/env bash
-pnpm --dir ~/.claude/kanban-board dev
+set -euo pipefail
+if [ -d "$HOME/.codex/kanban-board" ]; then
+  pnpm --dir "$HOME/.codex/kanban-board" dev
+elif [ -d "$HOME/.claude/kanban-board" ]; then
+  pnpm --dir "$HOME/.claude/kanban-board" dev
+else
+  echo "kanban-board not found in ~/.codex/kanban-board or ~/.claude/kanban-board" >&2
+  exit 1
+fi
 ```
 
 Make executable:
@@ -65,7 +75,7 @@ Output:
 ```
 ✅ Project '<PROJECT_NAME>' registered in kanban.
 
-  Config:  .claude/kanban.json
+  Config:  .codex/kanban.json, .claude/kanban.json
   DB:      Neon PostgreSQL (shared central DB)
   Board:   http://localhost:5173/?project=<PROJECT_NAME>
   Start:   ./kanban-board/start.sh
@@ -77,13 +87,13 @@ Add tasks with /kanban add <title>
 
 ### Existing config detection
 
-If `.claude/kanban.json` already exists:
+If either `.codex/kanban.json` or `.claude/kanban.json` already exists:
 1. Read the `project` field and **strip `.db` suffix** (old format stored DB filename as project name)
 2. If the cleaned name differs from what's stored (e.g. `cpet.db` → `cpet`), show the migration clearly
 3. Ask the user whether to overwrite or keep as-is:
 
 ```
-.claude/kanban.json already exists:
+.codex/kanban.json or .claude/kanban.json already exists:
   Current project: "cpet.db"  →  will use "cpet" (stripped .db suffix)
 
 Options:
@@ -92,5 +102,6 @@ Options:
 ```
 
 - The central board (`~/.claude/kanban-board/`) must be installed. If `~/.claude/kanban-board/package.json` doesn't exist, warn the user.
+- The central board should exist in either `~/.codex/kanban-board/` or `~/.claude/kanban-board/`. If neither has `package.json`, warn the user.
 - `node_modules/` in the local `kanban-board/` is not created (no `pnpm install` needed — the central board handles its own deps).
 - The kanban-board server must be running (`./kanban-board/start.sh`) before using `/kanban` commands.

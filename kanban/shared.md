@@ -5,14 +5,14 @@ All projects share a single centralized DB — the kanban-board server must be r
 
 ## DB Path & Project Config
 
-Read project config from `.claude/kanban.json` (created by `/kanban-init`):
+Read project config from `.codex/kanban.json` or `.claude/kanban.json` (created by `/kanban-init`):
 
 ```bash
-CONFIG=$(cat .claude/kanban.json 2>/dev/null)
+CONFIG=$(cat .codex/kanban.json 2>/dev/null || cat .claude/kanban.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
 ```
 
-If `.claude/kanban.json` doesn't exist, prompt user to run `/kanban-init`, or fall back to `basename "$(pwd)"`.
+If neither config file exists, prompt user to run `/kanban-init`, or fall back to `basename "$(pwd)"`.
 
 ## Pipeline Levels
 
@@ -30,15 +30,17 @@ Level is set at task creation and stored in the `level` column.
 Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 ```
 
-| Column | Status | Agent | Model |
+| Column | Status | Agent | Model Key |
 |--------|--------|-------|-------|
 | Req | `todo` | User | - |
-| Plan | `plan` | Plan Agent | opus (Task) |
-| Review Plan | `plan_review` | Review Agent | sonnet (Task) |
-| Impl | `impl` | Worker → TDD Tester (sequential) | opus → sonnet |
-| Review Impl | `impl_review` | Code Review Agent | sonnet (Task) |
-| Test | `test` | Test Runner | sonnet (Task) |
+| Plan | `plan` | Plan Agent | `planner` |
+| Review Plan | `plan_review` | Review Agent | `critic` |
+| Impl | `impl` | Worker → TDD Tester (sequential) | `builder` → `shield` |
+| Review Impl | `impl_review` | Code Review Agent | `inspector` |
+| Test | `test` | Test Runner | `ranger` |
 | Done | `done` | - | - |
+
+Model keys are resolved to real provider models through `models.json`.
 
 ### Valid Status Transitions
 
@@ -85,12 +87,12 @@ curl -s -X POST http://localhost:5173/api/task \
 # Plan review result
 curl -s -X POST "http://localhost:5173/api/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"reviewer": "sonnet", "status": "approved", "comment": "..."}'
+  -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "..."}'
 
 # Impl review result
 curl -s -X POST "http://localhost:5173/api/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"reviewer": "sonnet", "status": "approved", "comment": "..."}'
+  -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "..."}'
 
 # Test result
 curl -s -X POST "http://localhost:5173/api/task/$ID/test-result?project=$PROJECT" \
@@ -111,7 +113,7 @@ curl -s -X PATCH "http://localhost:5173/api/task/$ID/reorder?project=$PROJECT" \
 curl -s -X DELETE "http://localhost:5173/api/task/$ID?project=$PROJECT"
 ```
 
-> For full schema, column descriptions, and JSON field formats, read `~/.claude/skills/kanban/schema.md`.
+> For full schema, column descriptions, and JSON field formats, read `schema.md`.
 
 ## JSON Safety in curl
 
@@ -149,6 +151,8 @@ Or use Python `json.dumps()` to serialize the body safely.
 
 Each agent **signs their output** with a header: `> **Nickname** \`model\` · timestamp`
 The `agent_log` accumulates the full chronological history of all agents who touched the task.
+
+The `model` value should be the resolved provider model from `models.json` (not a hardcoded provider name in the template).
 
 | Nickname | Reads | Writes (signed) | Moves to |
 |----------|-------|-----------------|----------|

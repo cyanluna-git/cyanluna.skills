@@ -4,7 +4,7 @@ description: Manage project tasks in Neon PostgreSQL via kanban-board HTTP API. 
 license: MIT
 ---
 
-> Shared context: read `~/.claude/skills/kanban/shared.md` for DB path, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Shared context: read `shared.md` for DB path, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 
 ## Commands
 
@@ -69,6 +69,7 @@ Run `/kanban-init` first to register this project.
 
 Add to `.gitignore`:
 ```
+.codex/kanban.json
 .claude/kanban.json
 kanban-board/
 ```

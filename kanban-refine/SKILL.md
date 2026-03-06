@@ -4,7 +4,7 @@ description: Refine backlog requirements through structured user interview. Turn
 license: MIT
 ---
 
-> Shared context: read `~/.claude/skills/kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 
 ## `/kanban-refine <ID>` — Refine Backlog Requirements
 
@@ -79,7 +79,27 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - Also update title if it was clarified during interview
    - Update level/priority/tags if discussed
    - Append to agent_log:
-     { "agent": "Refiner", "model": "opus", "message": "Requirements refined. N questions across M rounds.", "timestamp": "..." }
+     { "agent": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "timestamp": "..." }
+
+### Model Routing
+
+Resolve `MODEL_REFINER` from `../kanban/models.json`:
+
+```bash
+MODEL_PROVIDER=${KANBAN_MODEL_PROVIDER:-}
+if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -d .codex ]; then MODEL_PROVIDER=codex; fi
+
+MODEL_REFINER=$(python3 - "$MODEL_PROVIDER" <<'PY'
+import json, pathlib, sys
+d = json.loads(pathlib.Path("../kanban/models.json").read_text())
+provider = sys.argv[1] or d["default_provider"]
+print(d["providers"][provider]["refiner"])
+PY
+)
+```
 ```
 
 ### Interview Tips
