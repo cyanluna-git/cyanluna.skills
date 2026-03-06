@@ -1,10 +1,11 @@
 <h1 align="center">cyanluna.skills</h1>
 <p align="center">
-  AI-powered kanban pipeline for Claude Code — seven autonomous agents, one board.
+  AI-powered kanban pipeline for Claude Code and Codex — seven autonomous agents, one board.
 </p>
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Claude_Code-skills-8A2BE2" alt="Claude Code Skills" />
+  <img src="https://img.shields.io/badge/Codex-supported-10A37F" alt="Codex Supported" />
   <img src="https://img.shields.io/badge/version-3.1.0-green" alt="v3.1.0" />
   <img src="https://img.shields.io/badge/DB-Neon_PostgreSQL-00E599" alt="Neon PostgreSQL" />
   <img src="https://img.shields.io/badge/Storage-Cloudflare_R2-F38020" alt="Cloudflare R2" />
@@ -46,18 +47,29 @@
 
 ```bash
 git clone https://github.com/cyanluna/cyanluna.skills.git
-cp -R cyanluna.skills/kanban         ~/.claude/skills/
-cp -R cyanluna.skills/kanban-run     ~/.claude/skills/
-cp -R cyanluna.skills/kanban-refine  ~/.claude/skills/
-cp -R cyanluna.skills/kanban-init    ~/.claude/skills/
-cp -R cyanluna.skills/kanban-explore ~/.claude/skills/
-cp -R cyanluna.skills/kanban-board   ~/.claude/kanban-board
+REPO="$PWD/cyanluna.skills"
+
+# Claude install
+mkdir -p ~/.claude/skills
+cp -R "$REPO"/kanban         ~/.claude/skills/
+cp -R "$REPO"/kanban-run     ~/.claude/skills/
+cp -R "$REPO"/kanban-refine  ~/.claude/skills/
+cp -R "$REPO"/kanban-init    ~/.claude/skills/
+cp -R "$REPO"/kanban-explore ~/.claude/skills/
+cp -R "$REPO"/kanban-board   ~/.claude/kanban-board
+
+# Codex install (recommended: symlink to shared source)
+mkdir -p ~/.codex/skills
+for s in kanban kanban-run kanban-refine kanban-init kanban-explore; do
+  ln -sfn "$REPO/$s" "$HOME/.codex/skills/$s"
+done
+ln -sfn "$HOME/.claude/kanban-board" "$HOME/.codex/kanban-board"
 ```
 
 **2. Set up environment**
 
 ```bash
-cd ~/.claude/kanban-board
+cd ~/.codex/kanban-board 2>/dev/null || cd ~/.claude/kanban-board
 cp .env.example .env   # fill in DATABASE_URL and optionally Cloudflare R2 vars
 pnpm install
 ```
@@ -71,7 +83,7 @@ For image attachments, set up a [Cloudflare R2](https://www.cloudflare.com/devel
 /kanban-init
 ```
 
-This creates `.claude/kanban.json` and a `kanban-board/start.sh` launcher.
+This creates `.claude/kanban.json`, `.codex/kanban.json`, and a `kanban-board/start.sh` launcher.
 Project data is stored in Neon under a `project` column — no local DB files needed.
 
 **4. Start the board and add tasks**
@@ -95,15 +107,17 @@ Every task flows through a 7-column board. AI agents handle each stage automatic
 Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 ```
 
-| Column | Agent | Model | What happens |
+| Column | Agent | Model (Claude / Codex) | What happens |
 |--------|-------|-------|--------------|
 | **Requirements** | User | — | You describe what needs to be done |
-| **Plan** | `Planner` | opus | Reads requirements, writes plan + decision log + done-when checklist |
-| **Review Plan** | `Critic` | sonnet | Scores plan on 3 dimensions, approves or requests changes |
-| **Implement** | `Builder` + `Shield` | opus + sonnet | Builder implements; Shield writes TDD tests |
-| **Review Impl** | `Inspector` | sonnet | Scores code on 7 dimensions, approves or rejects |
-| **Test** | `Ranger` | sonnet | Runs lint, build, and test suite |
+| **Plan** | `Planner` | opus / gpt-5.2 | Reads requirements, writes plan + decision log + done-when checklist |
+| **Review Plan** | `Critic` | sonnet / gpt-5.2 | Scores plan on 3 dimensions, approves or requests changes |
+| **Implement** | `Builder` + `Shield` | opus+sonnet / gpt-5.3-codex | Builder implements; Shield writes TDD tests |
+| **Review Impl** | `Inspector` | sonnet / gpt-5.2 | Scores code on 7 dimensions, approves or rejects |
+| **Test** | `Ranger` | sonnet / gpt-5.3-codex | Runs lint, build, and test suite |
 | **Done** | — | — | Auto-commits with `[kanban #ID]` tag |
+
+Model routing is provider-aware via `kanban/models.json`.
 
 ### Pipeline Levels
 
@@ -121,15 +135,15 @@ Not every task needs the full pipeline. Set the level at creation time:
 
 Each agent has a fixed **nickname** used as a signature in every field and log entry. The task card becomes a complete work record — you can always see who wrote what and when.
 
-| Nickname | Role | Model | Reads | Writes |
+| Nickname | Role | Model (Claude / Codex) | Reads | Writes |
 |----------|------|-------|-------|--------|
-| `Planner` | Plan Agent | opus | description | plan, decision_log, done_when |
-| `Critic` | Plan Review | sonnet | description, plan, decision_log, done_when | plan_review_comments |
-| `Builder` | Worker | opus | description, plan, done_when, review comments | implementation_notes |
-| `Shield` | TDD Tester | sonnet | description, implementation_notes | implementation_notes (append) |
-| `Inspector` | Code Review | sonnet | description, plan, done_when, implementation_notes | review_comments |
-| `Ranger` | Test Runner | sonnet | implementation_notes | test_results |
-| `Refiner` | Requirements Refinement | sonnet | title, description | description (rewrite) |
+| `Planner` | Plan Agent | opus / gpt-5.2 | description | plan, decision_log, done_when |
+| `Critic` | Plan Review | sonnet / gpt-5.2 | description, plan, decision_log, done_when | plan_review_comments |
+| `Builder` | Worker | opus / gpt-5.3-codex | description, plan, done_when, review comments | implementation_notes |
+| `Shield` | TDD Tester | sonnet / gpt-5.3-codex | description, implementation_notes | implementation_notes (append) |
+| `Inspector` | Code Review | sonnet / gpt-5.2 | description, plan, done_when, implementation_notes | review_comments |
+| `Ranger` | Test Runner | sonnet / gpt-5.3-codex | implementation_notes | test_results |
+| `Refiner` | Requirements Refinement | opus / gpt-5.2 | title, description | description (rewrite) |
 
 **Signature rule** — every agent prepends a header to its output:
 
@@ -269,7 +283,7 @@ Use when you have a vague idea but don't know *how* to implement it. Explores th
 ## Architecture
 
 ```
-~/.claude/
+~/.claude/ and ~/.codex/
 ├── skills/
 │   ├── kanban/              # CRUD & board (SKILL.md + shared context + schema + templates)
 │   │   ├── SKILL.md
@@ -300,7 +314,8 @@ Neon PostgreSQL              # Centralized DB — all projects, all PCs
 
 <project>/
 ├── .claude/kanban.json      # Project config {"project": "my-project"}
-└── kanban-board/start.sh    # Launcher: pnpm --dir ~/.claude/kanban-board dev
+├── .codex/kanban.json       # Same project config for Codex
+└── kanban-board/start.sh    # Launcher: ~/.codex/kanban-board 우선, 없으면 ~/.claude/kanban-board
 ```
 
 All task data lives in Neon — accessible from any machine without file sync.
@@ -325,7 +340,7 @@ This repo also includes utility skills:
 | **model-router** | Routes Task tool subagents to optimal Claude model (Haiku/Sonnet/Opus) based on task complexity |
 | **gemini-claude-loop** | Dual-AI engineering loop — Claude plans and implements, Gemini validates and reviews |
 
-Install: `cp -R <skill-folder> ~/.claude/skills/`
+Install: `cp -R <skill-folder> ~/.claude/skills/` or `~/.codex/skills/` (or symlink from repo)
 
 ---
 
