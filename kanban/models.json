@@ -1,0 +1,34 @@
+{
+  "default_provider": "claude",
+  "providers": {
+    "claude": {
+      "refiner": "opus",
+      "planner": "opus",
+      "critic": "sonnet",
+      "builder": "opus",
+      "shield": "sonnet",
+      "inspector": "sonnet",
+      "ranger": "sonnet"
+    },
+    "codex": {
+      "refiner": "gpt-5.2",
+      "planner": "gpt-5.2",
+      "critic": "gpt-5.2",
+      "builder": "gpt-5.3-codex",
+      "shield": "gpt-5.3-codex",
+      "inspector": "gpt-5.2",
+      "ranger": "gpt-5.3-codex"
+    }
+  },
+  "reasoning_effort": {
+    "codex": {
+      "refiner": "medium",
+      "planner": "high",
+      "critic": "medium",
+      "builder": "high",
+      "shield": "medium",
+      "inspector": "medium",
+      "ranger": "medium"
+    }
+  }
+}

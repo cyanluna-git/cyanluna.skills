@@ -4,8 +4,8 @@ description: Run the AI team pipeline for kanban tasks — orchestration loop wi
 license: MIT
 ---
 
-> Shared context: read `~/.claude/skills/kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
-> Schema: read `~/.claude/skills/kanban/schema.md` for full DB schema, column descriptions, and JSON field formats.
+> Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Schema: read `../kanban/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## Commands
 
@@ -22,24 +22,80 @@ Execute only the next pipeline step then exit. Same logic as `/kanban-run` but n
 
 ```
 L1 Quick:
-  todo → Worker(opus) implements → commit → done
+  todo → Worker(builder) implements → commit → done
 
 L2 Standard:
-  todo → Plan Agent(opus) → impl (skip plan_review)
-  impl → Worker(opus) + TDD Tester(sonnet) → impl_review
+  todo → Plan Agent(planner) → impl (skip plan_review)
+  impl → Worker(builder) + TDD Tester(shield) → impl_review
   impl_review → Code Review → [user confirm] → commit → done / reject → impl
 
 L3 Full:
-  todo → Plan Agent(opus) → plan_review
-  plan_review → Review Agent(sonnet) → [user confirm] → impl / reject → plan
-  impl → Worker(opus) + TDD Tester(sonnet) → impl_review
-  impl_review → Code Review(sonnet) → [user confirm] → test / reject → impl
-  test → Test Runner(sonnet) → pass → commit → done / fail → impl
+  todo → Plan Agent(planner) → plan_review
+  plan_review → Review Agent(critic) → [user confirm] → impl / reject → plan
+  impl → Worker(builder) + TDD Tester(shield) → impl_review
+  impl_review → Code Review(inspector) → [user confirm] → test / reject → impl
+  test → Test Runner(ranger) → pass → commit → done / fail → impl
 
 Circuit breaker: plan_review_count > 3 OR impl_review_count > 3 → stop, ask user
 ```
 
 Read the task's `level` field first to determine which steps to execute.
+
+#### Model Routing (Provider-Aware)
+
+Resolve real model names from `../kanban/models.json` using provider:
+
+- `KANBAN_MODEL_PROVIDER` env var if set (`claude` or `codex`)
+- else `codex` when `CODEX_*` env is present
+- else `claude` when `CLAUDE_*` env is present
+- else `claude` when `.claude/` exists
+- else `codex` when `.codex/` exists
+- else `default_provider` from `models.json`
+
+```bash
+MODEL_PROVIDER=${KANBAN_MODEL_PROVIDER:-}
+if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -d .codex ]; then MODEL_PROVIDER=codex; fi
+
+read_model() {
+  local key="$1"
+  python3 - "$MODEL_PROVIDER" "$key" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path("../kanban/models.json")
+d = json.loads(p.read_text())
+provider = sys.argv[1] or d["default_provider"]
+key = sys.argv[2]
+print(d["providers"][provider][key])
+PY
+}
+
+read_effort() {
+  local key="$1"
+  python3 - "$MODEL_PROVIDER" "$key" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path("../kanban/models.json")
+d = json.loads(p.read_text())
+provider = sys.argv[1] or d["default_provider"]
+key = sys.argv[2]
+print(d.get("reasoning_effort", {}).get(provider, {}).get(key, ""))
+PY
+}
+
+MODEL_PLANNER=$(read_model planner)
+MODEL_CRITIC=$(read_model critic)
+MODEL_BUILDER=$(read_model builder)
+MODEL_SHIELD=$(read_model shield)
+MODEL_INSPECTOR=$(read_model inspector)
+MODEL_RANGER=$(read_model ranger)
+EFFORT_PLANNER=$(read_effort planner)
+EFFORT_CRITIC=$(read_effort critic)
+EFFORT_BUILDER=$(read_effort builder)
+EFFORT_SHIELD=$(read_effort shield)
+EFFORT_INSPECTOR=$(read_effort inspector)
+EFFORT_RANGER=$(read_effort ranger)
+```
 
 #### Implementation
 
@@ -57,29 +113,29 @@ STATUS=$(echo "$TASK" | jq -r '.status')
 
 Each agent has a fixed **nickname** used consistently across all records. The task card becomes a work log — every field and every log entry is signed.
 
-| Nickname | Role | Model | Status trigger |
-|----------|------|-------|----------------|
-| `Planner` | Plan Agent | `opus` | `todo` |
-| `Critic` | Plan Review Agent | `sonnet` | `plan_review` |
-| `Builder` | Worker Agent | `opus` | `impl` (step 1) |
-| `Shield` | TDD Tester | `sonnet` | `impl` (step 2) |
-| `Inspector` | Code Review Agent | `sonnet` | `impl_review` |
-| `Ranger` | Test Runner | `sonnet` | `test` |
+| Nickname | Role | Model Key | Reasoning Effort (codex) | Status trigger |
+|----------|------|-------|---------------------------|----------------|
+| `Planner` | Plan Agent | `planner` | `high` | `todo` |
+| `Critic` | Plan Review Agent | `critic` | `medium` | `plan_review` |
+| `Builder` | Worker Agent | `builder` | `high` | `impl` (step 1) |
+| `Shield` | TDD Tester | `shield` | `medium` | `impl` (step 2) |
+| `Inspector` | Code Review Agent | `inspector` | `medium` | `impl_review` |
+| `Ranger` | Test Runner | `ranger` | `medium` | `test` |
 
-> See `~/.claude/skills/kanban/schema.md` for JSON formats and the Signature Header Rule.
+> See `../kanban/schema.md` for JSON formats and the Signature Header Rule.
 
 #### Agent Dispatch
 
-Template files are at `~/.claude/skills/kanban/templates/`.
+Template files are at `../kanban/templates/`.
 
-| Status | Template | Nickname | Model |
+| Status | Template | Nickname | Model Key |
 |--------|----------|----------|-------|
-| `todo` | `templates/plan-agent.md` | `Planner` | `opus` |
-| `plan_review` | `templates/review-agent.md` | `Critic` | `sonnet` |
-| `impl` step 1 | `templates/worker-agent.md` | `Builder` | `opus` |
-| `impl` step 2 | `templates/tdd-tester.md` | `Shield` | `sonnet` |
-| `impl_review` | `templates/code-review-agent.md` | `Inspector` | `sonnet` |
-| `test` | `templates/test-runner.md` | `Ranger` | `sonnet` |
+| `todo` | `templates/plan-agent.md` | `Planner` | `planner` |
+| `plan_review` | `templates/review-agent.md` | `Critic` | `critic` |
+| `impl` step 1 | `templates/worker-agent.md` | `Builder` | `builder` |
+| `impl` step 2 | `templates/tdd-tester.md` | `Shield` | `shield` |
+| `impl_review` | `templates/code-review-agent.md` | `Inspector` | `inspector` |
+| `test` | `templates/test-runner.md` | `Ranger` | `ranger` |
 
 **Agent minimum fields (fetch only what each agent needs):**
 
@@ -114,7 +170,7 @@ Template files are at `~/.claude/skills/kanban/templates/`.
    curl PATCH /api/task/$ID  →  { "current_agent": "<Nickname>" }
 
 ③ Read template file
-   Read tool: ~/.claude/skills/kanban/templates/<agent>.md
+   Read tool: ../kanban/templates/<agent>.md
 
 ④ Fill placeholders in template
    Replace every occurrence of:
@@ -128,11 +184,52 @@ Template files are at `~/.claude/skills/kanban/templates/`.
      <implementation_notes>   → implementation_notes field value
      <plan_review_comments>   → plan_review_comments field value
      <TIMESTAMP>              → current UTC time (ISO 8601)
+     <MODEL_PLANNER>          → $MODEL_PLANNER
+     <MODEL_CRITIC>           → $MODEL_CRITIC
+     <MODEL_BUILDER>          → $MODEL_BUILDER
+     <MODEL_SHIELD>           → $MODEL_SHIELD
+     <MODEL_INSPECTOR>        → $MODEL_INSPECTOR
+     <MODEL_RANGER>           → $MODEL_RANGER
+     <EFFORT_PLANNER>         → $EFFORT_PLANNER
+     <EFFORT_CRITIC>          → $EFFORT_CRITIC
+     <EFFORT_BUILDER>         → $EFFORT_BUILDER
+     <EFFORT_SHIELD>          → $EFFORT_SHIELD
+     <EFFORT_INSPECTOR>       → $EFFORT_INSPECTOR
+     <EFFORT_RANGER>          → $EFFORT_RANGER
+
+   Recommended helper script:
+   ```bash
+   PROMPT=$(python3 ../kanban/scripts/render_agent_prompt.py \
+     --template ../kanban/templates/<agent>.md \
+     --models ../kanban/models.json \
+     --provider "$MODEL_PROVIDER" \
+     --set ID="$ID" \
+     --set PROJECT="$PROJECT" \
+     --set title="$TITLE" \
+     --set description="$DESCRIPTION" \
+     --set plan="$PLAN" \
+     --set decision_log="$DECISION_LOG" \
+     --set done_when="$DONE_WHEN" \
+     --set implementation_notes="$IMPLEMENTATION_NOTES" \
+     --set plan_review_comments="$PLAN_REVIEW_COMMENTS" \
+     --set TIMESTAMP="$TIMESTAMP")
+   ```
+   If a field is missing, pass empty string (`--set key=""`).
+   Use `--strict` only when every unresolved `<...>` token should be treated as an error.
 
 ⑤ Launch Task tool with filled prompt
+   If MODEL_PROVIDER is `codex`:
+   Task(
+     subagent_type         = "general-purpose",
+     model                 = "<resolved model from models.json>",
+     model_reasoning_effort= "<resolved effort from models.json>",
+     prompt                = <filled template content>
+   )
+
+   Otherwise (`claude`):
    Task(
      subagent_type = "general-purpose",
-     model         = "<opus|sonnet>",   ← from the table above
+     model         = "<resolved model from models.json>",
      prompt        = <filled template content>
    )
 

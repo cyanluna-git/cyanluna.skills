@@ -62,21 +62,21 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 Each agent has a fixed nickname used in all log records, field headers, and `current_agent`.
 
-| Nickname | Role | Model | Writes to |
+| Nickname | Role | Model Key | Writes to |
 |----------|------|-------|-----------|
-| `Planner` | Plan Agent | `opus` | `plan`, `decision_log`, `done_when` |
-| `Critic` | Plan Review Agent | `sonnet` | `plan_review_comments` |
-| `Builder` | Worker Agent | `opus` | `implementation_notes` |
-| `Shield` | TDD Tester | `sonnet` | `implementation_notes` (append) |
-| `Inspector` | Code Review Agent | `sonnet` | `review_comments` |
-| `Ranger` | Test Runner | `sonnet` | `test_results` |
+| `Planner` | Plan Agent | `planner` | `plan`, `decision_log`, `done_when` |
+| `Critic` | Plan Review Agent | `critic` | `plan_review_comments` |
+| `Builder` | Worker Agent | `builder` | `implementation_notes` |
+| `Shield` | TDD Tester | `shield` | `implementation_notes` (append) |
+| `Inspector` | Code Review Agent | `inspector` | `review_comments` |
+| `Ranger` | Test Runner | `ranger` | `test_results` |
 
 ## Signature Header Rule
 
 **Every agent MUST prepend a signature header** to the content it writes:
 
 ```markdown
-> **Planner** `opus` · 2026-02-24T10:00:00Z
+> **Planner** `<MODEL_PLANNER>` · 2026-02-24T10:00:00Z
 ```
 
 This makes every card field self-documenting — you can see at a glance who wrote what and when.
@@ -88,9 +88,9 @@ This makes every card field self-documenting — you can see at a glance who wro
 [
   {
     "reviewer": "Inspector",
-    "model": "sonnet",
+    "model": "<MODEL_INSPECTOR>",
     "status": "changes_requested",
-    "comment": "> **Inspector** `sonnet` · 2026-02-20T14:30:00Z\n\n## Review Findings\n\n1. Missing error handling",
+    "comment": "> **Inspector** `<MODEL_INSPECTOR>` · 2026-02-20T14:30:00Z\n\n## Review Findings\n\n1. Missing error handling",
     "timestamp": "2026-02-20T14:30:00.000Z"
   }
 ]
@@ -103,12 +103,12 @@ This makes every card field self-documenting — you can see at a glance who wro
 [
   {
     "tester": "Ranger",
-    "model": "sonnet",
+    "model": "<MODEL_RANGER>",
     "status": "pass",
     "lint": "0 errors, 0 warnings",
     "build": "Build successful",
     "tests": "42 passed, 0 failed",
-    "comment": "> **Ranger** `sonnet` · 2026-02-20T15:00:00Z\n\nAll checks passed.",
+    "comment": "> **Ranger** `<MODEL_RANGER>` · 2026-02-20T15:00:00Z\n\nAll checks passed.",
     "timestamp": "2026-02-20T15:00:00.000Z"
   }
 ]
@@ -123,19 +123,19 @@ Every entry must include `agent` (nickname), `model`, `message`, and `timestamp`
 [
   {
     "agent": "Planner",
-    "model": "opus",
+    "model": "<MODEL_PLANNER>",
     "message": "Plan complete. 4 files to modify, 2 new components.",
     "timestamp": "2026-02-20T10:05:00.000Z"
   },
   {
     "agent": "Critic",
-    "model": "sonnet",
+    "model": "<MODEL_CRITIC>",
     "message": "Plan approved. No major issues.",
     "timestamp": "2026-02-20T10:10:00.000Z"
   },
   {
     "agent": "Builder",
-    "model": "opus",
+    "model": "<MODEL_BUILDER>",
     "message": "Implementation complete. All files modified per plan.",
     "timestamp": "2026-02-20T11:00:00.000Z"
   }
@@ -161,7 +161,7 @@ subprocess.run(['curl','-s','-X','PATCH','http://localhost:5173/api/task/$ID?pro
 "
 ```
 
-Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), `MODEL` with `opus` or `sonnet`.
+Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
 
 ## Schema Migrations
 
