@@ -37,8 +37,9 @@ def expand_selector(raw: str) -> list[int]:
     seen: set[int] = set()
 
     for part in parts:
-        if "-" in part:
-            start_raw, end_raw = part.split("-", 1)
+        if "-" in part or "~" in part:
+            separator = "-" if "-" in part else "~"
+            start_raw, end_raw = part.split(separator, 1)
             start = int(start_raw)
             end = int(end_raw)
             step = 1 if end >= start else -1
@@ -59,10 +60,15 @@ def expand_selector(raw: str) -> list[int]:
 def fetch_task(base_url: str, project: str, task_id: int) -> dict:
     url = f"{base_url}/api/task/{task_id}?project={urllib.parse.quote(project)}"
     try:
-        with urllib.request.urlopen(url) as response:
+        with urllib.request.urlopen(url, timeout=10) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         raise SystemExit(f"failed to fetch task {task_id}: HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(
+            f"failed to connect to {base_url} for task {task_id}: {exc.reason}\n"
+            "Is the kanban-board server running? Start it with: ./kanban-board/start.sh"
+        ) from exc
 
 
 def parse_phase(tags: str | None) -> int | None:
