@@ -16,6 +16,18 @@ Execute several kanban tasks as one orchestrated batch. Expand task ranges, sort
 ## Resources
 
 - Use `scripts/plan_batch.py` to normalize selectors, fetch task metadata, and produce phase-ordered candidates.
+- Read `references/parallel-rules.md` when deciding whether tasks are safe to run in parallel.
+
+## Metadata Hints
+
+If task descriptions include any of these lines, use them as strong signals:
+
+- `Depends on: #500, #501`
+- `Parallel-safe: yes`
+- `Parallel-safe: no`
+- `Touches: browse-data, header-nav`
+
+If these hints are absent, fall back to conservative inference from phase, tags, title, and description.
 
 ## Workflow
 
@@ -39,6 +51,7 @@ Execute several kanban tasks as one orchestrated batch. Expand task ranges, sort
      - titles/tags/descriptions point to distinct modules or surfaces
      - failure in one task would not invalidate another task's work
    - If any doubt remains, stay sequential.
+   - Prefer explicit `Depends on:` / `Parallel-safe:` metadata over heuristic guesses.
 6. Execute each group:
    - For a sequential group, run tasks one by one with the same behavior you would use for `/kanban-run <ID>`.
    - For a parallel group, run the independent tasks concurrently, but report them as one batch stage.
@@ -64,6 +77,8 @@ Execute several kanban tasks as one orchestrated batch. Expand task ranges, sort
 - Do not invent hidden dependencies, but do not ignore obvious ones either.
 - If a prior task creates data contracts, routes, or shared components used by later tasks, keep the chain sequential.
 - Re-check the worktree between tasks. If one task changed files the next task also needs, that is expected in a sequential chain.
+- Treat shared routes, shared server loaders, shared types, and shared top-level navigation as dependency hotspots.
+- Only parallelize when the batch planner can explain the decision in one sentence.
 
 ## Output Style
 
@@ -71,5 +86,6 @@ Execute several kanban tasks as one orchestrated batch. Expand task ranges, sort
   - ordered tasks
   - proposed grouping
   - whether execution will be sequential or mixed
+  - one-line reason per group
 - Then execute.
 - End with a short batch summary plus the next resume point if the batch stopped early.
