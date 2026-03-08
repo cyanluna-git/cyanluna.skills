@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kanban Batch Run"
+  short_description: "Run ordered kanban task batches safely"
+  default_prompt: "Use $kanban-batch-run to execute tasks 500-504 in dependency order."
