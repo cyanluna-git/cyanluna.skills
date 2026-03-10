@@ -26,7 +26,7 @@ Sign all your work with: `> **Ranger** \`<MODEL_RANGER>\` · <TIMESTAMP>`
 
 ```bash
 # Submit signed test result
-curl -s -X POST "http://localhost:5173/api/task/<ID>/test-result?project=<PROJECT>" \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/<ID>/test-result?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d '{
     "tester": "Ranger",

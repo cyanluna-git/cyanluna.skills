@@ -10,25 +10,46 @@ No per-project DB file is created — Neon handles storage for all projects auto
 ## Usage
 
 ```
-/kanban-init                  — project name = basename of current directory
-/kanban-init my-project-name  — explicit project name
+/kanban-init                                      — project name = basename of current directory, board = localhost
+/kanban-init my-project-name                      — explicit project name, board = localhost
+/kanban-init my-project-name https://board.example.com
+                                                 — explicit project name + remote board URL
+/kanban-init https://board.example.com           — current directory name + remote board URL
 ```
 
-The argument after `kanban-init` (if any) is the project name. Strip any leading dashes: `kanban-init -unahouse.finance` → project `unahouse.finance`.
+If a URL argument is present, treat it as `base_url`. Strip any leading dashes from the project token: `kanban-init -unahouse.finance` → project `unahouse.finance`.
 
 ## Procedure
 
-### 1. Determine project name
+### 1. Determine project name and board URL
 
 ```bash
-# If argument provided, strip leading dashes and .db suffix:
-PROJECT=$(echo "$ARG" | sed 's/^-*//' | sed 's/\.db$//')
+# Split raw args
+set -- $ARG
+ARG1="${1:-}"
+ARG2="${2:-}"
 
-# Otherwise, use basename of current directory (also strip .db if present):
-PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
+# Accept either:
+#   /kanban-init my-project
+#   /kanban-init my-project https://board.example.com
+#   /kanban-init https://board.example.com
+if printf '%s' "$ARG1" | grep -Eq '^https?://'; then
+  PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
+  BASE_URL="$ARG1"
+else
+  PROJECT=$(printf '%s' "$ARG1" | sed 's/^-*//' | sed 's/\.db$//')
+  if [ -z "$PROJECT" ]; then
+    PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
+  fi
+  BASE_URL="${ARG2:-http://localhost:5173}"
+fi
+
+# Optional shared token for private remote boards
+AUTH_TOKEN="${KANBAN_AUTH_TOKEN:-}"
 ```
 
 **Always strip `.db` suffix** — old configs stored the DB filename as the project name (e.g. `cpet.db`), which would conflict without this fix.
+If no board URL is provided, default to `http://localhost:5173`.
 
 ### 2. Write local project config
 
@@ -38,11 +59,22 @@ Create both config files in the **current project root**:
 
 ```json
 {
-  "project": "<PROJECT_NAME>"
+  "project": "<PROJECT_NAME>",
+  "base_url": "<BASE_URL>",
+  "auth_token": "<OPTIONAL_AUTH_TOKEN>"
 }
 ```
 
-Use the Write tool to create both files with the same content.
+`auth_token` is optional. Omit it when not provided.
+
+Use the Write tool to create both files with the same content. Existing configs that only contain `{ "project": "..." }` remain valid and should still be treated as:
+
+```json
+{
+  "project": "<PROJECT_NAME>",
+  "base_url": "http://localhost:5173"
+}
+```
 
 ### 3. Create `kanban-board/start.sh`
 
@@ -77,7 +109,8 @@ Output:
 
   Config:  .codex/kanban.json, .claude/kanban.json
   DB:      Neon PostgreSQL (shared central DB)
-  Board:   http://localhost:5173/?project=<PROJECT_NAME>
+  Board:   <BASE_URL>/?project=<PROJECT_NAME>
+  Auth:    configured from KANBAN_AUTH_TOKEN (optional)
   Start:   ./kanban-board/start.sh
 
 Add tasks with /kanban add <title>
@@ -89,12 +122,14 @@ Add tasks with /kanban add <title>
 
 If either `.codex/kanban.json` or `.claude/kanban.json` already exists:
 1. Read the `project` field and **strip `.db` suffix** (old format stored DB filename as project name)
-2. If the cleaned name differs from what's stored (e.g. `cpet.db` → `cpet`), show the migration clearly
+2. Preserve existing `base_url` and `auth_token` unless the user explicitly overwrites them
+3. If the cleaned name differs from what's stored (e.g. `cpet.db` → `cpet`), show the migration clearly
 3. Ask the user whether to overwrite or keep as-is:
 
 ```
 .codex/kanban.json or .claude/kanban.json already exists:
   Current project: "cpet.db"  →  will use "cpet" (stripped .db suffix)
+  Current board: "https://board.example.com"
 
 Options:
 1. Overwrite — update config
@@ -104,4 +139,5 @@ Options:
 - The central board (`~/.claude/kanban-board/`) must be installed. If `~/.claude/kanban-board/package.json` doesn't exist, warn the user.
 - The central board should exist in either `~/.codex/kanban-board/` or `~/.claude/kanban-board/`. If neither has `package.json`, warn the user.
 - `node_modules/` in the local `kanban-board/` is not created (no `pnpm install` needed — the central board handles its own deps).
-- The kanban-board server must be running (`./kanban-board/start.sh`) before using `/kanban` commands.
+- The kanban-board server must be running (`./kanban-board/start.sh`) before using `/kanban` commands when `base_url` points at localhost.
+- For remote private boards, prefer setting `KANBAN_AUTH_TOKEN` in the shell before running `/kanban-init` so the token is not hardcoded into the skill prompt text.

@@ -36,10 +36,130 @@ async function deleteFromR2(key: string): Promise<void> {
 }
 
 type Sql = ReturnType<typeof neon>;
+const BOARD_STATUSES = ["todo", "plan", "plan_review", "impl", "impl_review", "test", "done"] as const;
 
 // Typed query helper: returns T[]
 async function q<T>(sql: Sql, text: string, params?: any[]): Promise<T[]> {
   return (await sql.query(text, params)) as unknown as T[];
+}
+
+function parseJsonArray(raw: string | null): any[] {
+  if (!raw || raw === "null") return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLastStatus(raw: string | null): string | null {
+  const entries = parseJsonArray(raw);
+  const last = entries[entries.length - 1];
+  return typeof last?.status === "string" ? last.status : null;
+}
+
+function createEtag(parts: Array<string | null | undefined>): string {
+  const raw = parts.map((part) => part ?? "").join("|");
+  return `W/"${Buffer.from(raw).toString("base64url")}"`;
+}
+
+function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  if (typeof header !== "string" || !header.trim()) return false;
+  return header
+    .split(",")
+    .map((value) => value.trim())
+    .some((value) => value === "*" || value === etag);
+}
+
+function summarizeBoardTask(task: Task) {
+  return {
+    id: task.id,
+    project: task.project,
+    title: task.title,
+    status: task.status,
+    priority: task.priority,
+    level: task.level,
+    current_agent: task.current_agent,
+    plan_review_count: task.plan_review_count,
+    impl_review_count: task.impl_review_count,
+    rank: task.rank,
+    tags: task.tags,
+    created_at: task.created_at,
+    completed_at: task.completed_at,
+    note_count: parseJsonArray(task.notes).length,
+    last_review_status: getLastStatus(task.review_comments),
+    last_plan_review_status: getLastStatus(task.plan_review_comments),
+  };
+}
+
+function normalizeTimestamp(value: unknown): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+async function readBoardMeta(sql: Sql, projectParam: string | null) {
+  if (projectParam) {
+    const safe = sanitizeProject(projectParam);
+    const [row] = await q<{ total: number | string; updated_at: string | null }>(sql, `
+      SELECT COUNT(*)::int AS total, MAX(updated_at) AS updated_at
+      FROM tasks
+      WHERE project = $1
+    `, [safe]);
+    const total = Number(row?.total || 0);
+    const updatedAt = normalizeTimestamp(row?.updated_at);
+    return { total, updated_at: updatedAt, version: `${updatedAt || "0"}:${total}` };
+  }
+
+  const [row] = await q<{ total: number | string; updated_at: string | null }>(sql, `
+    SELECT COUNT(*)::int AS total, MAX(updated_at) AS updated_at
+    FROM tasks
+  `);
+  const total = Number(row?.total || 0);
+  const updatedAt = normalizeTimestamp(row?.updated_at);
+  return { total, updated_at: updatedAt, version: `${updatedAt || "0"}:${total}` };
+}
+
+async function readBoardCounts(sql: Sql, projectParam: string | null) {
+  let rows: Array<{ status: string; total: number | string }>;
+  if (projectParam) {
+    const safe = sanitizeProject(projectParam);
+    rows = await q(sql, `
+      SELECT status, COUNT(*)::int AS total
+      FROM tasks
+      WHERE project = $1
+      GROUP BY status
+    `, [safe]);
+  } else {
+    rows = await q(sql, `
+      SELECT status, COUNT(*)::int AS total
+      FROM tasks
+      GROUP BY status
+    `);
+  }
+
+  const counts = Object.fromEntries(BOARD_STATUSES.map((status) => [status, 0])) as Record<string, number>;
+  for (const row of rows) {
+    if (BOARD_STATUSES.includes(row.status as typeof BOARD_STATUSES[number])) {
+      counts[row.status] = Number(row.total || 0);
+    }
+  }
+  return counts;
+}
+
+function sortBoardGroup<T extends { completed_at?: string | null; rank?: number; id?: number }>(status: string, tasks: T[]): T[] {
+  const sorted = [...tasks];
+  if (status === "done") {
+    return sorted.sort((a, b) => {
+      const completedOrder = String(b.completed_at || "").localeCompare(String(a.completed_at || ""));
+      if (completedOrder !== 0) return completedOrder;
+      return Number(a.rank || 0) - Number(b.rank || 0) || Number(a.id || 0) - Number(b.id || 0);
+    });
+  }
+  return sorted.sort((a, b) =>
+    Number(a.rank || 0) - Number(b.rank || 0) || Number(a.id || 0) - Number(b.id || 0)
+  );
 }
 
 // Valid status transitions per pipeline level
@@ -132,6 +252,7 @@ async function initializeSchema(sql: Sql): Promise<void> {
       done_when TEXT,
       rank INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
       started_at TIMESTAMPTZ,
       planned_at TIMESTAMPTZ,
       reviewed_at TIMESTAMPTZ,
@@ -159,8 +280,15 @@ async function initializeSchema(sql: Sql): Promise<void> {
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notes TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS decision_log TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when TEXT`,
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
   ];
   for (const m of migrations) await sql.query(m);
+
+  await sql.query(`
+    UPDATE tasks
+    SET updated_at = COALESCE(updated_at, completed_at, tested_at, reviewed_at, planned_at, started_at, created_at, NOW())
+    WHERE updated_at IS NULL
+  `);
 
   await sql.query(`
     UPDATE tasks SET rank = sub.new_rank
@@ -228,9 +356,14 @@ interface Task {
   reviewed_at: string | null;
   tested_at: string | null;
   completed_at: string | null;
+  updated_at: string | null;
 }
 
 interface Board {
+  version?: string;
+  updated_at?: string | null;
+  total?: number;
+  counts?: Partial<Record<typeof BOARD_STATUSES[number], number>>;
   todo: Task[];
   plan: Task[];
   plan_review: Task[];
@@ -291,17 +424,58 @@ export function kanbanApiPlugin(): Plugin {
           return;
         }
 
+        if (pathname === "/api/board/version" && req.method === "GET") {
+          const projectParam = reqUrl.searchParams.get("project");
+          const meta = await readBoardMeta(sql, projectParam);
+          const etag = createEtag(["board-version", projectParam || "*", meta.version]);
+          res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+          res.setHeader("ETag", etag);
+          if (etagMatches(req.headers["if-none-match"], etag)) {
+            res.statusCode = 304;
+            res.end();
+            return;
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            project: projectParam || null,
+            ...meta,
+          }));
+          return;
+        }
+
         // GET /api/board?project=xxx[&summary=true]
         if (pathname === "/api/board") {
           const projectParam = reqUrl.searchParams.get("project");
           const summary = reqUrl.searchParams.get("summary") === "true";
+          const compactBoard = summary && reqUrl.searchParams.get("compact") === "board";
+          const todoLimit = compactBoard ? Math.max(0, Number.parseInt(reqUrl.searchParams.get("todo_limit") || "10", 10) || 10) : null;
+          const doneLimit = compactBoard ? Math.max(0, Number.parseInt(reqUrl.searchParams.get("done_limit") || "10", 10) || 10) : null;
           const fields = summary
             ? `id, project, title, status, priority, level, current_agent,
                plan_review_count, impl_review_count, rank, tags,
                created_at, completed_at,
-               LEFT(description, 80) AS description,
                review_comments, plan_review_comments, notes`
             : `*`;
+          const meta = await readBoardMeta(sql, projectParam);
+          const counts = await readBoardCounts(sql, projectParam);
+          const projectsMeta = projectParam ? await readBoardMeta(sql, null) : meta;
+          const etag = createEtag([
+            "board",
+            summary ? "summary" : "full",
+            compactBoard ? "compact-board" : "full-board",
+            projectParam || "*",
+            compactBoard ? String(todoLimit) : "",
+            compactBoard ? String(doneLimit) : "",
+            meta.version,
+            projectsMeta.version,
+          ]);
+          res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+          res.setHeader("ETag", etag);
+          if (etagMatches(req.headers["if-none-match"], etag)) {
+            res.statusCode = 304;
+            res.end();
+            return;
+          }
 
           const projectRows = await q<{ project: string }>(sql,
             "SELECT DISTINCT project FROM tasks ORDER BY project"
@@ -318,20 +492,38 @@ export function kanbanApiPlugin(): Plugin {
             tasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank, id`);
           }
 
-          const grouped = new Map<string, Task[]>();
-          for (const t of tasks) {
+          const boardTasks = summary ? tasks.map(summarizeBoardTask) : tasks;
+
+          const grouped = new Map<string, any[]>();
+          for (const t of boardTasks) {
             const arr = grouped.get(t.status);
             if (arr) arr.push(t);
             else grouped.set(t.status, [t]);
           }
+          const groupedBoard = Object.fromEntries(
+            BOARD_STATUSES.map((status) => {
+              const tasksForStatus = sortBoardGroup(status, grouped.get(status) || []);
+              if (compactBoard && status === "todo") {
+                return [status, tasksForStatus.slice(0, todoLimit ?? 10)];
+              }
+              if (compactBoard && status === "done") {
+                return [status, tasksForStatus.slice(0, doneLimit ?? 10)];
+              }
+              return [status, tasksForStatus];
+            })
+          );
           const board: Board = {
-            todo: grouped.get("todo") || [],
-            plan: grouped.get("plan") || [],
-            plan_review: grouped.get("plan_review") || [],
-            impl: grouped.get("impl") || [],
-            impl_review: grouped.get("impl_review") || [],
-            test: grouped.get("test") || [],
-            done: grouped.get("done") || [],
+            version: meta.version,
+            updated_at: meta.updated_at,
+            total: meta.total,
+            counts,
+            todo: groupedBoard.todo || [],
+            plan: groupedBoard.plan || [],
+            plan_review: groupedBoard.plan_review || [],
+            impl: groupedBoard.impl || [],
+            impl_review: groupedBoard.impl_review || [],
+            test: groupedBoard.test || [],
+            done: groupedBoard.done || [],
             projects,
           };
 
@@ -355,7 +547,7 @@ export function kanbanApiPlugin(): Plugin {
               "test_results","agent_log","current_agent","plan_review_count",
               "impl_review_count","level","attachments","notes","decision_log",
               "done_when","rank","created_at","started_at","planned_at",
-              "reviewed_at","tested_at","completed_at",
+              "reviewed_at","tested_at","completed_at","updated_at",
             ]);
             const fieldsParam = reqUrl.searchParams.get("fields");
             const fields = fieldsParam
@@ -433,6 +625,7 @@ export function kanbanApiPlugin(): Plugin {
             if (body.done_when !== undefined)     { sets.push(`done_when = $${p++}`); vals.push(body.done_when); }
 
             if (sets.length > 0) {
+              sets.push("updated_at = NOW()");
               vals.push(id, safe);
               await sql.query(
                 `UPDATE tasks SET ${sets.join(", ")} WHERE id = $${p++} AND project = $${p}`,
@@ -544,7 +737,7 @@ export function kanbanApiPlugin(): Plugin {
             } else { newRank = 1000; }
           } else { newRank = 1000; }
 
-          await sql.query("UPDATE tasks SET rank = $1 WHERE id = $2", [newRank, id]);
+          await sql.query("UPDATE tasks SET rank = $1, updated_at = NOW() WHERE id = $2", [newRank, id]);
 
           res.setHeader("Content-Type", "application/json");
           broadcast();
@@ -606,7 +799,7 @@ export function kanbanApiPlugin(): Plugin {
 
           const approvedTarget = task.level <= 2 ? "done" : "test";
           const newStatus = body.status === "approved" ? approvedTarget : "impl";
-          let updateQ = `UPDATE tasks SET review_comments = $1, reviewed_at = NOW(), status = $2, impl_review_count = $3`;
+          let updateQ = `UPDATE tasks SET review_comments = $1, reviewed_at = NOW(), updated_at = NOW(), status = $2, impl_review_count = $3`;
           const vals: any[] = [JSON.stringify(comments), newStatus, task.impl_review_count + 1];
           if (newStatus === "test") updateQ += ", tested_at = NOW()";
           else if (newStatus === "done") updateQ += ", completed_at = NOW()";
@@ -638,7 +831,7 @@ export function kanbanApiPlugin(): Plugin {
 
           const newStatus = body.status === "approved" ? "impl" : "plan";
           await sql.query(
-            "UPDATE tasks SET plan_review_comments = $1, status = $2, plan_review_count = $3 WHERE id = $4 AND project = $5",
+            "UPDATE tasks SET plan_review_comments = $1, updated_at = NOW(), status = $2, plan_review_count = $3 WHERE id = $4 AND project = $5",
             [JSON.stringify(comments), newStatus, task.plan_review_count + 1, id, safe]
           );
 
@@ -667,7 +860,7 @@ export function kanbanApiPlugin(): Plugin {
           results.push(newResult);
 
           const newStatus = body.status === "pass" ? "done" : "impl";
-          let updateQ = `UPDATE tasks SET test_results = $1, status = $2`;
+          let updateQ = `UPDATE tasks SET test_results = $1, updated_at = NOW(), status = $2`;
           if (newStatus === "done") updateQ += ", completed_at = NOW()";
           await sql.query(updateQ + " WHERE id = $3 AND project = $4", [JSON.stringify(results), newStatus, id, safe]);
 
@@ -695,7 +888,7 @@ export function kanbanApiPlugin(): Plugin {
           const note = { id: Date.now(), text: body.text || "", author: body.author || "user", timestamp: new Date().toISOString() };
           notes.push(note);
 
-          await sql.query("UPDATE tasks SET notes = $1 WHERE id = $2 AND project = $3", [JSON.stringify(notes), id, safe]);
+          await sql.query("UPDATE tasks SET notes = $1, updated_at = NOW() WHERE id = $2 AND project = $3", [JSON.stringify(notes), id, safe]);
           res.setHeader("Content-Type", "application/json");
           broadcast();
           res.end(JSON.stringify({ success: true, note }));
@@ -717,7 +910,7 @@ export function kanbanApiPlugin(): Plugin {
           if (!task) { res.statusCode = 404; res.end(JSON.stringify({ error: "Not found" })); return; }
 
           const notes = (task.notes ? JSON.parse(task.notes) : []).filter((n: any) => n.id !== noteId);
-          await sql.query("UPDATE tasks SET notes = $1 WHERE id = $2 AND project = $3", [JSON.stringify(notes), id, safe]);
+          await sql.query("UPDATE tasks SET notes = $1, updated_at = NOW() WHERE id = $2 AND project = $3", [JSON.stringify(notes), id, safe]);
           res.setHeader("Content-Type", "application/json");
           broadcast();
           res.end(JSON.stringify({ success: true }));
@@ -754,7 +947,7 @@ export function kanbanApiPlugin(): Plugin {
 
           const attachments = task.attachments ? JSON.parse(task.attachments) : [];
           attachments.push({ filename: body.filename || "image.png", storedName: safeName, url: `${r2PublicUrl()}/${safeName}`, size: buffer.byteLength, uploaded_at: new Date().toISOString() });
-          await sql.query("UPDATE tasks SET attachments = $1 WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
+          await sql.query("UPDATE tasks SET attachments = $1, updated_at = NOW() WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
 
           res.setHeader("Content-Type", "application/json");
           broadcast();
@@ -781,7 +974,7 @@ export function kanbanApiPlugin(): Plugin {
           if (idx >= 0) {
             const [removed] = attachments.splice(idx, 1);
             await deleteFromR2(removed.storedName);
-            await sql.query("UPDATE tasks SET attachments = $1 WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
+            await sql.query("UPDATE tasks SET attachments = $1, updated_at = NOW() WHERE id = $2 AND project = $3", [JSON.stringify(attachments), id, safe]);
           }
 
           res.setHeader("Content-Type", "application/json");

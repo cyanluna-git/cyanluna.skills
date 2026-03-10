@@ -14,10 +14,10 @@
       "refiner": "gpt-5.2",
       "planner": "gpt-5.2",
       "critic": "gpt-5.2",
-      "builder": "gpt-5.3-codex",
-      "shield": "gpt-5.3-codex",
+      "builder": "gpt-5.4-codex",
+      "shield": "gpt-5.4-codex",
       "inspector": "gpt-5.2",
-      "ranger": "gpt-5.3-codex"
+      "ranger": "gpt-5.4-codex"
     }
   },
   "reasoning_effort": {

@@ -58,7 +58,7 @@ Write implementation notes with your signature header at the top:
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Write signed implementation notes (do NOT change status)
-curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d "{\"implementation_notes\": \"> **Builder** \`<MODEL_BUILDER>\` · $TIMESTAMP\n\n<NOTES_MARKDOWN>\", \"current_agent\": null}"
 ```

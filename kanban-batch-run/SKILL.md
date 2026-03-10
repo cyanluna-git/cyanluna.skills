@@ -53,7 +53,7 @@ Before any execution:
 
 ```bash
 # Server health check
-curl -sf "http://localhost:5173/api/board?project=$PROJECT&summary=true" > /dev/null
+curl -sf "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true" > /dev/null
 ```
 
 - If the server is not reachable, instruct the user to run `./kanban-board/start.sh` and stop.
@@ -68,7 +68,7 @@ Resolve the current project from `.codex/kanban.json` or `.claude/kanban.json`.
 Run:
 
 ```bash
-python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>"
+python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>" --base-url "$BASE_URL" --auth-token "$AUTH_TOKEN"
 ```
 
 ### 3. Read plan
@@ -165,7 +165,7 @@ In default mode, L2/L3 tasks pause for user confirmation at review checkpoints. 
 After each Skill call completes, verify the outcome by checking the task's kanban status:
 
 ```bash
-STATUS=$(curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT&fields=status" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+STATUS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
 ```
 
 | Status | Interpretation | Action |

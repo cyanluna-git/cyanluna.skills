@@ -1,3 +1,5 @@
+type ColumnKey = "todo" | "plan" | "plan_review" | "impl" | "impl_review" | "test" | "done";
+
 interface Task {
   id: number;
   project: string;
@@ -5,7 +7,7 @@ interface Task {
   status: string;
   priority: string;
   rank: number;
-  description: string | null;
+  description?: string | null;
   plan: string | null;
   implementation_notes: string | null;
   tags: string | null;
@@ -27,9 +29,17 @@ interface Task {
   reviewed_at: string | null;
   tested_at: string | null;
   completed_at: string | null;
+  updated_at: string | null;
+  note_count?: number;
+  last_review_status?: string | null;
+  last_plan_review_status?: string | null;
 }
 
 interface Board {
+  version?: string;
+  updated_at?: string | null;
+  total?: number;
+  counts?: Partial<Record<ColumnKey, number>>;
   todo: Task[];
   plan: Task[];
   plan_review: Task[];
@@ -38,6 +48,15 @@ interface Board {
   test: Task[];
   done: Task[];
   projects: string[];
+}
+
+interface AuthSessionState {
+  authenticated: boolean;
+  authRequired: boolean;
+  mode?: string;
+  source?: string | null;
+  reason?: string | null;
+  error?: string | null;
 }
 
 const COLUMNS = [
@@ -58,12 +77,528 @@ const STATUS_BADGES: Record<string, string> = {
   test:        "Testing",
 };
 
+const AUTH_STORAGE_KEY = "kanban-auth-token";
+const VIEW_STORAGE_KEY = "kanban-current-view";
+const MOBILE_BOARD_COLUMNS_KEY = "kanban-mobile-board-columns";
+const BOARD_VERSION_POLL_MS = 30000;
+const BOARD_TODO_LIMIT = 10;
+const BOARD_DONE_LIMIT = 10;
+const SUMMARY_CACHE_PREFIX = "kanban-summary-cache";
+const SUMMARY_TTL_MS: Record<SummaryMode, number> = {
+  board: 30_000,
+  full: 60_000,
+};
+const MOBILE_MEDIA_QUERY = window.matchMedia("(max-width: 768px)");
+type SummaryMode = "board" | "full";
+
+interface PersistedSummaryCacheEntry {
+  fetchedAt: number;
+  etag: string | null;
+  board: Board;
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  const isSecure =
+    window.location.protocol === "https:" ||
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1";
+  if (!isSecure) return;
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.warn("Service worker registration failed", error);
+    });
+  });
+}
+
+function isView(value: string | null): value is "board" | "list" | "chronicle" {
+  return value === "board" || value === "list" || value === "chronicle";
+}
+
+function isColumnKey(value: string): value is typeof COLUMNS[number]["key"] {
+  return COLUMNS.some((column) => column.key === value);
+}
+
+function readStoredMobileBoardColumns(): Set<string> {
+  try {
+    const raw = localStorage.getItem(MOBILE_BOARD_COLUMNS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((value): value is string => typeof value === "string" && isColumnKey(value)));
+  } catch {
+    return new Set();
+  }
+}
+
 let currentProject: string | null = localStorage.getItem('kanban-project');
 let isDragging = false;
-let currentView: "board" | "list" | "chronicle" = "board";
+let isMobileViewport = MOBILE_MEDIA_QUERY.matches;
+let currentView: "board" | "list" | "chronicle" = isView(localStorage.getItem(VIEW_STORAGE_KEY))
+  ? (localStorage.getItem(VIEW_STORAGE_KEY) as "board" | "list" | "chronicle")
+  : (isMobileViewport ? "list" : "board");
 let currentSearch: string = '';
 let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
 let hideOldDone: boolean = localStorage.getItem('kanban-hide-old') === 'true';
+let currentAuthToken: string = localStorage.getItem(AUTH_STORAGE_KEY) || "";
+let authRequired = false;
+let authReady = false;
+let sseConnected = false;
+let mobileFiltersOpen = !isMobileViewport;
+let mobileBoardExpanded = readStoredMobileBoardColumns();
+let currentBoardVersion: string | null = null;
+let boardVersionPollId: number | null = null;
+let currentBoardVersionEtag: string | null = null;
+const summaryBoardCache = new Map<string, Board>();
+const summaryBoardEtagCache = new Map<string, string>();
+const summaryRevalidation = new Map<string, Promise<void>>();
+
+function setAuthMessage(message: string, tone: "default" | "error" | "success" = "default") {
+  const messageEl = document.getElementById("auth-message")!;
+  messageEl.textContent = message;
+  messageEl.classList.remove("error", "success");
+  if (tone !== "default") {
+    messageEl.classList.add(tone);
+  }
+}
+
+function syncOverlayState() {
+  const overlays = [
+    document.getElementById("modal-overlay"),
+    document.getElementById("add-card-overlay"),
+    document.getElementById("auth-overlay"),
+  ];
+  const anyOpen = overlays.some((overlay) => overlay && !overlay.classList.contains("hidden"));
+  document.body.classList.toggle("overlay-open", anyOpen);
+}
+
+function updateAuthButton() {
+  const button = document.getElementById("auth-btn") as HTMLButtonElement | null;
+  if (!button) return;
+  if (!authRequired) {
+    button.textContent = "Open";
+    button.title = "Board access is open in this environment";
+    return;
+  }
+  button.textContent = authReady ? "Private" : "Locked";
+  button.title = authReady ? "Shared token configured for this browser" : "Shared token required";
+}
+
+function showAuthOverlay(message = "Enter the shared access token to load the board.", tone: "default" | "error" | "success" = "default") {
+  authReady = false;
+  document.getElementById("auth-overlay")!.classList.remove("hidden");
+  syncOverlayState();
+  const input = document.getElementById("auth-token-input") as HTMLInputElement;
+  input.value = currentAuthToken;
+  setAuthMessage(message, tone);
+  updateAuthButton();
+  setTimeout(() => input.focus(), 0);
+}
+
+function hideAuthOverlay() {
+  document.getElementById("auth-overlay")!.classList.add("hidden");
+  syncOverlayState();
+  updateAuthButton();
+}
+
+function rememberAuthToken(token: string) {
+  currentAuthToken = token.trim();
+  if (currentAuthToken) {
+    localStorage.setItem(AUTH_STORAGE_KEY, currentAuthToken);
+  } else {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+function updateMobileShellState() {
+  document.body.classList.toggle("mobile-shell", isMobileViewport);
+  document.body.classList.toggle("mobile-toolbar-open", !isMobileViewport || mobileFiltersOpen);
+
+  const toggle = document.getElementById("toolbar-mobile-toggle") as HTMLButtonElement | null;
+  if (toggle) {
+    const expanded = !isMobileViewport || mobileFiltersOpen;
+    toggle.hidden = !isMobileViewport;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.textContent = expanded ? "Hide Filters" : "Show Filters";
+  }
+}
+
+function syncViewportState(nextMobile: boolean) {
+  isMobileViewport = nextMobile;
+  if (!isMobileViewport) {
+    mobileFiltersOpen = true;
+  }
+  updateMobileShellState();
+  if (authReady && currentView === "board") {
+    refreshCurrentView();
+  }
+}
+
+function shouldUseSSE(): boolean {
+  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+}
+
+function stopBoardVersionPolling() {
+  if (boardVersionPollId !== null) {
+    window.clearInterval(boardVersionPollId);
+    boardVersionPollId = null;
+  }
+}
+
+function boardCacheKey(project: string | null = currentProject, mode: SummaryMode = "full"): string {
+  return `${project || "__all__"}::${mode}`;
+}
+
+function persistedSummaryCacheKey(project: string | null = currentProject, mode: SummaryMode = "full"): string {
+  return `${SUMMARY_CACHE_PREFIX}::${boardCacheKey(project, mode)}`;
+}
+
+function readPersistedSummaryCache(project: string | null = currentProject, mode: SummaryMode = "full"): PersistedSummaryCacheEntry | null {
+  try {
+    const raw = localStorage.getItem(persistedSummaryCacheKey(project, mode));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedSummaryCacheEntry;
+    if (!parsed || typeof parsed.fetchedAt !== "number" || !parsed.board) return null;
+    if (Date.now() - parsed.fetchedAt > SUMMARY_TTL_MS[mode]) {
+      localStorage.removeItem(persistedSummaryCacheKey(project, mode));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedSummaryCache(project: string | null, mode: SummaryMode, board: Board, etag: string | null) {
+  try {
+    const payload: PersistedSummaryCacheEntry = {
+      fetchedAt: Date.now(),
+      etag,
+      board,
+    };
+    localStorage.setItem(persistedSummaryCacheKey(project, mode), JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota / serialization failures.
+  }
+}
+
+function invalidateSummaryCaches(project: string | null = currentProject, mode?: SummaryMode) {
+  const modes: SummaryMode[] = mode ? [mode] : ["board", "full"];
+  for (const currentMode of modes) {
+    const cacheKey = boardCacheKey(project, currentMode);
+    summaryBoardCache.delete(cacheKey);
+    summaryBoardEtagCache.delete(cacheKey);
+    summaryRevalidation.delete(cacheKey);
+    try {
+      localStorage.removeItem(persistedSummaryCacheKey(project, currentMode));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+  if (project === currentProject) {
+    currentBoardVersion = null;
+    currentBoardVersionEtag = null;
+  }
+}
+
+function clearBoardCaches(options: { persisted?: boolean } = {}) {
+  summaryBoardCache.clear();
+  summaryBoardEtagCache.clear();
+  summaryRevalidation.clear();
+  currentBoardVersion = null;
+  currentBoardVersionEtag = null;
+  if (options.persisted) {
+    try {
+      const keysToDelete: string[] = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith(`${SUMMARY_CACHE_PREFIX}::`)) {
+          keysToDelete.push(key);
+        }
+      }
+      keysToDelete.forEach((key) => localStorage.removeItem(key));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+}
+
+function clearStoredAuthToken() {
+  currentAuthToken = "";
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  const input = document.getElementById("auth-token-input") as HTMLInputElement | null;
+  if (input) input.value = "";
+}
+
+async function readAuthSessionState(): Promise<AuthSessionState> {
+  const headers = new Headers();
+  if (currentAuthToken) {
+    headers.set("X-Kanban-Auth", currentAuthToken);
+  }
+  const res = await fetch("/api/auth/session", {
+    method: "GET",
+    headers,
+    credentials: "same-origin",
+  });
+  const payload = await res.json().catch(() => ({}));
+  return {
+    authenticated: Boolean(payload.authenticated),
+    authRequired: Boolean(payload.authRequired),
+    mode: payload.mode,
+    source: payload.source ?? null,
+    reason: payload.reason ?? null,
+    error: payload.error ?? null,
+  };
+}
+
+async function establishAuthSession(token: string) {
+  const nextToken = token.trim();
+  const res = await fetch("/api/auth/session", {
+    method: "POST",
+    headers: {
+      "X-Kanban-Auth": nextToken,
+    },
+    credentials: "same-origin",
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const reason = payload.reason === "invalid_token"
+      ? "Shared token is invalid."
+      : payload.reason === "token_hash_missing"
+        ? "Server auth is not configured yet."
+        : "Board authentication failed.";
+    throw new Error(reason);
+  }
+  rememberAuthToken(nextToken);
+  authRequired = Boolean(payload.authRequired);
+  authReady = true;
+  hideAuthOverlay();
+  updateAuthButton();
+}
+
+async function clearAuthSession() {
+  await fetch("/api/auth/session", {
+    method: "DELETE",
+    credentials: "same-origin",
+  }).catch(() => {});
+  stopBoardVersionPolling();
+  clearBoardCaches({ persisted: true });
+  clearStoredAuthToken();
+  authReady = !authRequired;
+  updateAuthButton();
+}
+
+async function apiFetch(input: string, init: RequestInit = {}, allowUnauthorized = false): Promise<Response> {
+  const headers = new Headers(init.headers || {});
+  if (currentAuthToken && !headers.has("X-Kanban-Auth")) {
+    headers.set("X-Kanban-Auth", currentAuthToken);
+  }
+  const response = await fetch(input, {
+    ...init,
+    headers,
+    credentials: "same-origin",
+  });
+
+  if ((response.status === 401 || response.status === 403 || response.status === 503) && !allowUnauthorized) {
+    const payload = await response.clone().json().catch(() => ({}));
+    authRequired = true;
+    authReady = false;
+    if (payload.reason === "invalid_token") {
+      clearStoredAuthToken();
+    }
+    const message = payload.reason === "invalid_token"
+      ? "Stored token was rejected. Enter a valid shared token."
+      : payload.reason === "token_hash_missing"
+        ? "Server auth hash is not configured yet."
+        : "Shared token is required for this board.";
+    showAuthOverlay(message, "error");
+    throw new Error(payload.error || message);
+  }
+
+  return response;
+}
+
+async function readBoardVersion(projectOverride: string | null = currentProject) {
+  const params = projectOverride
+    ? `?project=${encodeURIComponent(projectOverride)}`
+    : "";
+  const headers = new Headers();
+  if (currentBoardVersionEtag) {
+    headers.set("If-None-Match", currentBoardVersionEtag);
+  }
+  const response = await apiFetch(`/api/board/version${params}`, { headers });
+  if (response.status === 304) {
+    if (!currentBoardVersion) {
+      currentBoardVersionEtag = null;
+      return readBoardVersion();
+    }
+    return null;
+  }
+  currentBoardVersionEtag = response.headers.get("ETag");
+  return response.json() as Promise<{ version: string; updated_at: string | null; total: number }>;
+}
+
+function currentViewUsesSummaryMode(mode: SummaryMode): boolean {
+  return mode === "board" ? currentView === "board" : currentView === "list" || currentView === "chronicle";
+}
+
+function revalidateSummaryCache(mode: SummaryMode, cacheKey: string, cachedVersion: string | null, projectOverride: string | null) {
+  if (!authReady || summaryRevalidation.has(cacheKey)) return;
+
+  const work = (async () => {
+    try {
+      const meta = await readBoardVersion(projectOverride);
+      if (!meta) return;
+      if (cachedVersion && meta.version === cachedVersion) {
+        currentBoardVersion = meta.version;
+        return;
+      }
+      invalidateSummaryCaches(projectOverride, mode);
+      await fetchSummaryBoard(mode, { bypassTtl: true, projectOverride });
+      if (currentProject === projectOverride && currentViewUsesSummaryMode(mode)) {
+        refreshCurrentView();
+      }
+    } catch {
+      // Ignore background revalidation failures.
+    } finally {
+      summaryRevalidation.delete(cacheKey);
+    }
+  })();
+
+  summaryRevalidation.set(cacheKey, work);
+}
+
+async function fetchSummaryBoard(
+  mode: SummaryMode = "full",
+  options: { bypassTtl?: boolean; projectOverride?: string | null } = {}
+): Promise<Board> {
+  const projectForRequest = options.projectOverride === undefined ? currentProject : options.projectOverride;
+  const queryParts = ["summary=true"];
+  if (projectForRequest) {
+    queryParts.unshift(`project=${encodeURIComponent(projectForRequest)}`);
+  }
+  if (mode === "board") {
+    queryParts.push("compact=board", `todo_limit=${BOARD_TODO_LIMIT}`, `done_limit=${BOARD_DONE_LIMIT}`);
+  }
+  const params = `?${queryParts.join("&")}`;
+  const cacheKey = boardCacheKey(projectForRequest, mode);
+
+  if (!options.bypassTtl) {
+    const persisted = readPersistedSummaryCache(projectForRequest, mode);
+    if (persisted) {
+      summaryBoardCache.set(cacheKey, persisted.board);
+      if (persisted.etag) {
+        summaryBoardEtagCache.set(cacheKey, persisted.etag);
+      }
+      currentBoardVersion = persisted.board.version || currentBoardVersion;
+      revalidateSummaryCache(mode, cacheKey, persisted.board.version || null, projectForRequest);
+      return persisted.board;
+    }
+  }
+
+  const headers = new Headers();
+  const knownEtag = summaryBoardEtagCache.get(cacheKey);
+  if (knownEtag) {
+    headers.set("If-None-Match", knownEtag);
+  }
+
+  const response = await apiFetch(`/api/board${params}`, { headers });
+  if (response.status === 304) {
+    const cached = summaryBoardCache.get(cacheKey);
+    if (cached) {
+      currentBoardVersion = cached.version || currentBoardVersion;
+      return cached;
+    }
+    summaryBoardEtagCache.delete(cacheKey);
+    return fetchSummaryBoard(mode, { bypassTtl: true });
+  }
+
+  const data: Board = await response.json();
+  const etag = response.headers.get("ETag");
+  if (etag) {
+    summaryBoardEtagCache.set(cacheKey, etag);
+  }
+  summaryBoardCache.set(cacheKey, data);
+  writePersistedSummaryCache(projectForRequest, mode, data, etag);
+  currentBoardVersion = data.version || currentBoardVersion;
+  return data;
+}
+
+function startBoardVersionPolling() {
+  if (shouldUseSSE() || boardVersionPollId !== null) return;
+
+  boardVersionPollId = window.setInterval(async () => {
+    if (!authReady || isDragging) return;
+    const detailOpen = !document.getElementById("modal-overlay")!.classList.contains("hidden");
+    const addOpen = !document.getElementById("add-card-overlay")!.classList.contains("hidden");
+    if (detailOpen || addOpen) return;
+
+    try {
+      const meta = await readBoardVersion();
+      if (!meta) {
+        return;
+      }
+      if (!currentBoardVersion) {
+        currentBoardVersion = meta.version;
+        return;
+      }
+      if (meta.version !== currentBoardVersion) {
+        currentBoardVersion = meta.version;
+        refreshCurrentView();
+      }
+    } catch {
+      if (authRequired && !authReady) {
+        stopBoardVersionPolling();
+      }
+    }
+  }, BOARD_VERSION_POLL_MS);
+}
+
+function ensureRealtimeSync() {
+  if (shouldUseSSE()) {
+    stopBoardVersionPolling();
+    connectSSE();
+    return;
+  }
+  startBoardVersionPolling();
+}
+
+function hydrateAuthTokenFromUrl() {
+  const url = new URL(window.location.href);
+  const token = url.searchParams.get("auth") || url.searchParams.get("token");
+  if (!token) return;
+  rememberAuthToken(token);
+  url.searchParams.delete("auth");
+  url.searchParams.delete("token");
+  window.history.replaceState({}, "", url.toString());
+}
+
+async function bootstrapAuth(): Promise<boolean> {
+  hydrateAuthTokenFromUrl();
+
+  if (currentAuthToken) {
+    try {
+      await establishAuthSession(currentAuthToken);
+      return true;
+    } catch (error) {
+      showAuthOverlay(error instanceof Error ? error.message : "Board authentication failed.", "error");
+      return false;
+    }
+  }
+
+  const session = await readAuthSessionState();
+  authRequired = session.authRequired;
+  authReady = session.authenticated || !session.authRequired;
+
+  if (session.authRequired && !session.authenticated) {
+    showAuthOverlay("Enter the shared access token to load the board.");
+    return false;
+  }
+
+  hideAuthOverlay();
+  return true;
+}
 
 function priorityClass(priority: string): string {
   if (priority === "high") return "high";
@@ -72,13 +607,96 @@ function priorityClass(priority: string): string {
   return "";
 }
 
+function persistMobileBoardExpanded() {
+  localStorage.setItem(MOBILE_BOARD_COLUMNS_KEY, JSON.stringify([...mobileBoardExpanded]));
+}
+
+function ensureMobileBoardExpanded(board: Board) {
+  if (!isMobileViewport || mobileBoardExpanded.size > 0) return;
+
+  const defaults = COLUMNS
+    .filter((column) => column.key === "todo" || column.key === "impl" || (column.key !== "done" && board[column.key as keyof Omit<Board, "projects">].length > 0))
+    .map((column) => column.key);
+
+  mobileBoardExpanded = new Set(defaults.length > 0 ? defaults : ["todo"]);
+  persistMobileBoardExpanded();
+}
+
+function isMobileColumnExpanded(columnKey: string): boolean {
+  if (!isMobileViewport || currentSearch.trim()) return true;
+  return mobileBoardExpanded.has(columnKey);
+}
+
+function getStatusLabel(status: string): string {
+  return COLUMNS.find((column) => column.key === status)?.label || status;
+}
+
+function getAllowedTransitions(level: number, status: string): string[] {
+  if (level === 1) {
+    const transitions: Record<string, string[]> = {
+      todo: ["impl"],
+      impl: ["done"],
+      done: [],
+    };
+    return transitions[status] || [];
+  }
+  if (level === 2) {
+    const transitions: Record<string, string[]> = {
+      todo: ["plan"],
+      plan: ["impl", "todo"],
+      impl: ["impl_review"],
+      impl_review: ["done", "impl"],
+      done: [],
+    };
+    return transitions[status] || [];
+  }
+  const transitions: Record<string, string[]> = {
+    todo: ["plan"],
+    plan: ["plan_review", "todo"],
+    plan_review: ["impl", "plan"],
+    impl: ["impl_review"],
+    impl_review: ["test", "impl"],
+    test: ["done", "impl"],
+    done: [],
+  };
+  return transitions[status] || [];
+}
+
+async function moveTaskStatus(task: Pick<Task, "id" | "project" | "status">, nextStatus: string) {
+  if (!nextStatus || nextStatus === task.status) return;
+
+  const resp = await apiFetch(`/api/task/${task.id}?project=${encodeURIComponent(task.project)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: nextStatus }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    showToast(err.error || "Failed to move task");
+    return;
+  }
+
+  invalidateSummaryCaches(task.project);
+  loadBoard();
+}
+
 function isOlderThan3Days(dateStr: string): boolean {
   if (!dateStr) return false;
   return Date.now() - new Date(dateStr).getTime() > 3 * 24 * 60 * 60 * 1000;
 }
 
-function sortTasks(tasks: Task[]): Task[] {
-  if (currentSort === 'default') return tasks;
+function sortTasks(tasks: Task[], status?: string): Task[] {
+  if (currentSort === 'default') {
+    if (status === 'done') {
+      return [...tasks].sort((a, b) => {
+        const completedOrder = (b.completed_at || '').localeCompare(a.completed_at || '');
+        if (completedOrder !== 0) return completedOrder;
+        return a.rank - b.rank || a.id - b.id;
+      });
+    }
+    return tasks;
+  }
   return [...tasks].sort((a, b) => {
     if (currentSort === 'created_asc')  return a.created_at.localeCompare(b.created_at);
     if (currentSort === 'created_desc') return b.created_at.localeCompare(a.created_at);
@@ -92,6 +710,7 @@ function sortTasks(tasks: Task[]): Task[] {
 function applySearchFilter() {
   const q = currentSearch.toLowerCase().replace(/^#/, '');
   const anyFilter = q.length > 0 || hideOldDone;
+  document.body.classList.toggle("mobile-board-search", currentView === "board" && isMobileViewport && q.length > 0);
 
   if (currentView === 'board') {
     document.querySelectorAll<HTMLElement>('.card').forEach(card => {
@@ -109,12 +728,18 @@ function applySearchFilter() {
     });
     // Update column counts: "visible/total" when any filter is active
     document.querySelectorAll<HTMLElement>('.column').forEach(col => {
-      const cards   = col.querySelectorAll<HTMLElement>('.card');
+      const cards = col.querySelectorAll<HTMLElement>('.card');
       const visible = [...cards].filter(c => c.style.display !== 'none').length;
+      const renderedCount = cards.length;
+      const totalCount = Number.parseInt(col.dataset.totalCount || `${renderedCount}`, 10) || renderedCount;
       const countEl = col.querySelector<HTMLElement>('.count');
-      if (countEl) countEl.textContent = anyFilter ? `${visible}/${cards.length}` : `${cards.length}`;
+      if (countEl) {
+        countEl.textContent = anyFilter || totalCount !== renderedCount
+          ? `${visible}/${totalCount}`
+          : `${totalCount}`;
+      }
     });
-  } else {
+  } else if (currentView === 'list') {
     document.querySelectorAll<HTMLElement>('#list-view tbody tr').forEach(row => {
       const searchOk = !q || (() => {
         const id      = row.dataset.id || '';
@@ -128,10 +753,40 @@ function applySearchFilter() {
         && isOlderThan3Days(row.dataset.completedAt || '');
       row.style.display = (searchOk && !doneHidden) ? '' : 'none';
     });
+    document.querySelectorAll<HTMLElement>('#list-view .list-card').forEach(card => {
+      const searchOk = !q || (() => {
+        const id = card.dataset.id || '';
+        const title = card.querySelector('.list-card-title')?.textContent?.toLowerCase() || '';
+        const project = card.dataset.project?.toLowerCase() || '';
+        const tags = [...card.querySelectorAll('.tag')].map((tag) => tag.textContent?.toLowerCase() || '').join(' ');
+        return id === q || title.includes(q) || project.includes(q) || tags.includes(q);
+      })();
+      const doneHidden = hideOldDone
+        && card.classList.contains('status-done')
+        && isOlderThan3Days(card.dataset.completedAt || '');
+      card.style.display = (searchOk && !doneHidden) ? '' : 'none';
+    });
+  } else {
+    document.querySelectorAll<HTMLElement>('#chronicle-view .chronicle-event').forEach(event => {
+      const searchOk = !q || (() => {
+        const id = event.dataset.id || '';
+        const title = event.querySelector('.chronicle-task-link')?.textContent?.toLowerCase() || '';
+        const project = event.dataset.project?.toLowerCase() || '';
+        return id === q || title.includes(q) || project.includes(q);
+      })();
+      const doneHidden = hideOldDone && isOlderThan3Days(event.dataset.completedAt || '');
+      event.style.display = (searchOk && !doneHidden) ? '' : 'none';
+    });
+    document.querySelectorAll<HTMLElement>('#chronicle-view .chronicle-group').forEach(group => {
+      const visibleEvents = [...group.querySelectorAll<HTMLElement>('.chronicle-event')]
+        .filter((event) => event.style.display !== 'none')
+        .length;
+      group.style.display = visibleEvents > 0 ? '' : 'none';
+    });
   }
 }
 
-function parseTags(tags: string | null): string[] {
+function parseTags(tags: string | null | undefined): string[] {
   if (!tags || tags === "null") return [];
   try {
     const parsed = JSON.parse(tags);
@@ -153,7 +808,7 @@ function timeAgo(dateStr: string): string {
   return dateStr.slice(0, 10);
 }
 
-function parseJsonArray(raw: string | null): any[] {
+function parseJsonArray(raw: string | null | undefined): any[] {
   if (!raw || raw === "null") return [];
   try {
     const parsed = JSON.parse(raw);
@@ -195,22 +850,22 @@ function renderCard(task: Task): string {
     : "";
 
   // Review badge (impl_review)
-  const reviewComments = parseJsonArray(task.review_comments);
-  const lastReview = reviewComments.length > 0 ? reviewComments[reviewComments.length - 1] : null;
-  const reviewBadge = lastReview
-    ? `<span class="badge ${lastReview.status === 'approved' ? 'review-approved' : 'review-changes'}">${
-        lastReview.status === 'approved' ? 'Approved' : 'Changes Req.'
+  const reviewComments = task.last_review_status ? [] : parseJsonArray(task.review_comments);
+  const lastReviewStatus = task.last_review_status || (reviewComments.length > 0 ? reviewComments[reviewComments.length - 1]?.status : null);
+  const reviewBadge = lastReviewStatus
+    ? `<span class="badge ${lastReviewStatus === 'approved' ? 'review-approved' : 'review-changes'}">${
+        lastReviewStatus === 'approved' ? 'Approved' : 'Changes Req.'
       }</span>`
     : task.status === 'impl_review'
       ? '<span class="badge review-pending">Awaiting Review</span>'
       : '';
 
   // Plan review badge
-  const planReviewComments = parseJsonArray(task.plan_review_comments);
-  const lastPlanReview = planReviewComments.length > 0 ? planReviewComments[planReviewComments.length - 1] : null;
-  const planReviewBadge = lastPlanReview
-    ? `<span class="badge ${lastPlanReview.status === 'approved' ? 'review-approved' : 'review-changes'}">${
-        lastPlanReview.status === 'approved' ? 'Plan OK' : 'Plan Changes'
+  const planReviewComments = task.last_plan_review_status ? [] : parseJsonArray(task.plan_review_comments);
+  const lastPlanReviewStatus = task.last_plan_review_status || (planReviewComments.length > 0 ? planReviewComments[planReviewComments.length - 1]?.status : null);
+  const planReviewBadge = lastPlanReviewStatus
+    ? `<span class="badge ${lastPlanReviewStatus === 'approved' ? 'review-approved' : 'review-changes'}">${
+        lastPlanReviewStatus === 'approved' ? 'Plan OK' : 'Plan Changes'
       }</span>`
     : task.status === 'plan_review'
       ? '<span class="badge review-pending">Plan Review</span>'
@@ -220,18 +875,30 @@ function renderCard(task: Task): string {
     .map((t) => `<span class="tag">${t}</span>`)
     .join("");
 
-  const desc = task.description
-    ? task.description.split("\n")[0].slice(0, 80)
-    : "";
-
   // Notes count
-  const noteCount = parseJsonArray(task.notes).length;
+  const noteCount = task.note_count ?? parseJsonArray(task.notes).length;
   const notesBadge = noteCount > 0
     ? `<span class="badge notes-count" title="${noteCount} note(s)">\u{1F4AC} ${noteCount}</span>`
     : "";
+  const mobileMoveOptions = getAllowedTransitions(task.level, task.status)
+    .map((status) => `<option value="${status}">${getStatusLabel(status)}</option>`)
+    .join("");
+  const mobileMoveControl = mobileMoveOptions
+    ? `
+      <label class="mobile-card-move card-interactive">
+        <span>Move</span>
+        <select class="mobile-status-select" data-id="${task.id}" data-project="${task.project}" data-current-status="${task.status}">
+          <option value="${task.status}">${getStatusLabel(task.status)}</option>
+          ${mobileMoveOptions}
+        </select>
+      </label>
+    `
+    : "";
+  const draggableAttr = isMobileViewport ? 'draggable="false"' : 'draggable="true"';
+  const cardClasses = isMobileViewport ? "card mobile-card" : "card";
 
   return `
-    <div class="card" draggable="true" data-id="${task.id}" data-status="${task.status}" data-project="${task.project}" data-completed-at="${task.completed_at || ''}">
+    <div class="${cardClasses}" ${draggableAttr} data-id="${task.id}" data-status="${task.status}" data-project="${task.project}" data-completed-at="${task.completed_at || ''}">
       <div class="card-header">
         <span class="card-id">#${task.id}</span>
         ${levelBadge}
@@ -241,7 +908,6 @@ function renderCard(task: Task): string {
         <button class="card-copy-btn" data-copy="#${task.id} ${task.title}" title="Copy to clipboard">⎘</button>
       </div>
       <div class="card-title">${task.title}</div>
-      ${desc ? `<div class="card-desc">${desc}</div>` : ""}
       <div class="card-footer">
         ${projectBadge}
         ${planReviewBadge}
@@ -249,6 +915,7 @@ function renderCard(task: Task): string {
         ${notesBadge}
         ${dateBadge}
       </div>
+      ${mobileMoveControl}
       ${tags ? `<div class="card-tags">${tags}</div>` : ""}
     </div>
   `;
@@ -258,19 +925,27 @@ function renderColumn(
   key: string,
   label: string,
   icon: string,
-  tasks: Task[]
+  tasks: Task[],
+  totalCount: number = tasks.length
 ): string {
-  const cardsHtml = sortTasks(tasks).map(renderCard).join("");
+  const expanded = isMobileColumnExpanded(key);
+  const cardsHtml = sortTasks(tasks, key).map(renderCard).join("");
   const addBtn = key === "todo"
     ? `<button class="add-card-btn" id="add-card-btn" title="Add card">+</button>`
     : "";
+  const countLabel = totalCount !== tasks.length ? `${tasks.length}/${totalCount}` : `${totalCount}`;
   return `
-    <div class="column ${key}" data-column="${key}">
+    <div class="column ${key}" data-column="${key}" data-mobile-expanded="${expanded}" data-total-count="${totalCount}">
       <div class="column-header">
-        <span>${icon} ${label}</span>
+        <button class="column-toggle-btn" type="button" data-column-toggle="${key}" aria-expanded="${expanded}">
+          <span class="column-toggle-label">${icon} ${label}</span>
+          <span class="column-toggle-meta">
+            <span class="count">${countLabel}</span>
+            <span class="column-toggle-icon" aria-hidden="true">${expanded ? "−" : "+"}</span>
+          </span>
+        </button>
         <div class="column-header-right">
           ${addBtn}
-          <span class="count">${tasks.length}</span>
         </div>
       </div>
       <div class="column-body" data-column="${key}">
@@ -497,7 +1172,7 @@ async function uploadFiles(taskId: number, files: FileList | File[], project: st
       reader.onload = () => resolve(reader.result as string);
       reader.readAsDataURL(file);
     });
-    await fetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
+    await apiFetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: file.name, data }),
@@ -511,11 +1186,19 @@ async function showTaskDetail(id: number, project?: string) {
   const content = document.getElementById("modal-content")!;
   content.innerHTML = '<div style="color:#94a3b8">Loading...</div>';
   overlay.classList.remove("hidden");
+  syncOverlayState();
 
   try {
     const projectParam = project ? `?project=${encodeURIComponent(project)}` : "";
-    const res = await fetch(`/api/task/${id}${projectParam}`);
+    const res = await apiFetch(`/api/task/${id}${projectParam}`);
     const task: Task = await res.json();
+    const boardCard = document.querySelector<HTMLElement>(
+      `.card[data-id="${task.id}"][data-project="${CSS.escape(task.project)}"]`
+    );
+    if (boardCard && boardCard.dataset.status !== task.status) {
+      clearBoardCaches();
+      refreshCurrentView();
+    }
 
     const tags = parseTags(task.tags);
     const tagsHtml = tags.length
@@ -809,18 +1492,20 @@ async function showTaskDetail(id: number, project?: string) {
     const levelSelect = document.getElementById("level-select") as HTMLSelectElement;
     levelSelect.addEventListener("change", async () => {
       const newLevel = parseInt(levelSelect.value);
-      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
+      await apiFetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ level: newLevel }),
       });
+      invalidateSummaryCaches(task.project);
       showTaskDetail(id, task.project);
     });
 
     // Delete task handler
     document.getElementById("delete-task-btn")!.addEventListener("click", async () => {
       if (!confirm(`Delete card #${task.id} "${task.title}"?`)) return;
-      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
+      await apiFetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
+      invalidateSummaryCaches(task.project);
       document.getElementById("modal-overlay")!.classList.add("hidden");
       refreshCurrentView();
     });
@@ -848,11 +1533,12 @@ async function showTaskDetail(id: number, project?: string) {
     reqSaveBtn.addEventListener("click", async () => {
       const newDesc = reqTextarea.value;
       reqSaveBtn.textContent = "Saving...";
-      await fetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
+      await apiFetch(`/api/task/${id}?project=${encodeURIComponent(task.project)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description: newDesc }),
       });
+      invalidateSummaryCaches(task.project);
       showTaskDetail(id, task.project);
     });
 
@@ -887,7 +1573,7 @@ async function showTaskDetail(id: number, project?: string) {
         const el = btn as HTMLElement;
         const taskId = el.dataset.id;
         const storedName = el.dataset.name;
-        await fetch(`/api/task/${taskId}/attachment/${encodeURIComponent(storedName!)}?project=${encodeURIComponent(task.project)}`, {
+        await apiFetch(`/api/task/${taskId}/attachment/${encodeURIComponent(storedName!)}?project=${encodeURIComponent(task.project)}`, {
           method: "DELETE",
         });
         showTaskDetail(id, task.project);
@@ -902,20 +1588,22 @@ async function showTaskDetail(id: number, project?: string) {
       const text = noteInput.value.trim();
       if (!text) return;
       noteInput.disabled = true;
-      await fetch(`/api/task/${id}/note?project=${encodeURIComponent(task.project)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        await apiFetch(`/api/task/${id}/note?project=${encodeURIComponent(task.project)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        invalidateSummaryCaches(task.project);
+        showTaskDetail(id, task.project);
       });
-      showTaskDetail(id, task.project);
-    });
 
     // Note delete buttons
     content.querySelectorAll(".note-delete").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
         const noteId = (btn as HTMLElement).dataset.noteId;
-        await fetch(`/api/task/${id}/note/${noteId}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
+        await apiFetch(`/api/task/${id}/note/${noteId}?project=${encodeURIComponent(task.project)}`, { method: "DELETE" });
+        invalidateSummaryCaches(task.project);
         showTaskDetail(id, task.project);
       });
     });
@@ -961,36 +1649,97 @@ function renderCompletedTask(task: Task): string {
   const priorityBadge = pClass
     ? `<span class="badge ${pClass}">${task.priority}</span>`
     : "";
+  const statusBadge = `<span class="badge status-${task.status}">${getStatusLabel(task.status)}</span>`;
 
   return `
-    <div class="chronicle-event">
+    <div class="chronicle-event" data-id="${task.id}" data-project="${task.project}" data-completed-at="${task.completed_at || ''}">
       <div class="chronicle-dot ev-completed"></div>
       <div class="chronicle-event-time">${fmtTime(task.completed_at!)}</div>
       <div class="chronicle-event-body">
         <button class="chronicle-task-link" data-id="${task.id}" data-project="${task.project}">
           #${task.id} ${task.title}
         </button>
+        ${statusBadge}
         ${priorityBadge}
         ${projectBadge}
       </div>
     </div>`;
 }
 
+function renderMobileListCard(task: Task): string {
+  const pClass = priorityClass(task.priority);
+  const priorityBadge = pClass
+    ? `<span class="badge ${pClass}">${task.priority}</span>`
+    : "";
+  const projectBadge = !currentProject && task.project
+    ? `<span class="badge project">${task.project}</span>`
+    : "";
+  const statusBadge = `<span class="badge status-${task.status}">${getStatusLabel(task.status)}</span>`;
+  const levelBadge = `<span class="badge level-${task.level}">L${task.level}</span>`;
+  const created = task.created_at?.slice(0, 10) || "";
+  const completed = task.completed_at?.slice(0, 10) || "—";
+  const tags = parseTags(task.tags);
+  const tagsHtml = tags.map((tag) => `<span class="tag">${tag}</span>`).join("");
+
+  return `
+    <article class="list-card status-${task.status}" data-id="${task.id}" data-project="${task.project}" data-completed-at="${task.completed_at || ''}">
+      <div class="list-card-top">
+        <div class="list-card-meta">
+          <span class="list-card-id">#${task.id}</span>
+          ${statusBadge}
+          ${levelBadge}
+          ${priorityBadge}
+        </div>
+        ${projectBadge}
+      </div>
+      <button class="list-card-title col-title" data-id="${task.id}" data-project="${task.project}">
+        ${task.title}
+      </button>
+      <div class="list-card-dates">
+        <span>Created ${created || "—"}</span>
+        <span>Done ${completed}</span>
+      </div>
+      <div class="list-card-controls">
+        <label>
+          <span>Status</span>
+          <select class="list-status-select" data-id="${task.id}" data-field="status">
+            ${COLUMNS.map((column) =>
+              `<option value="${column.key}" ${column.key === task.status ? "selected" : ""}>${column.label}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label>
+          <span>Level</span>
+          <select class="list-level-select" data-id="${task.id}" data-field="level">
+            ${[1, 2, 3].map((level) =>
+              `<option value="${level}" ${level === task.level ? "selected" : ""}>L${level}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label>
+          <span>Priority</span>
+          <select class="list-priority-select ${pClass}" data-id="${task.id}" data-field="priority">
+            ${["high", "medium", "low"].map((priority) =>
+              `<option value="${priority}" ${priority === task.priority ? "selected" : ""}>${priority[0].toUpperCase() + priority.slice(1)}</option>`
+            ).join("")}
+          </select>
+        </label>
+      </div>
+      ${tagsHtml ? `<div class="list-card-tags">${tagsHtml}</div>` : ""}
+    </article>
+  `;
+}
+
 async function loadChronicleView() {
   const el = document.getElementById("chronicle-view")!;
-  const params = currentProject
-    ? `?project=${encodeURIComponent(currentProject)}&summary=true`
-    : "?summary=true";
-
   try {
-    const res = await fetch(`/api/board${params}`);
-    const data: Board = await res.json();
+    const data = await fetchSummaryBoard("full");
 
     renderProjectFilter(data.projects);
 
     const allTasks: Task[] = [];
     for (const col of COLUMNS) {
-      for (const t of data[col.key as keyof Omit<Board, "projects">]) {
+      for (const t of data[col.key as keyof Omit<Board, "projects" | "counts">]) {
         allTasks.push(t);
       }
     }
@@ -1048,13 +1797,9 @@ async function loadChronicleView() {
 
 async function loadBoard() {
   const board = document.getElementById("board")!;
-  const params = currentProject
-    ? `?project=${encodeURIComponent(currentProject)}&summary=true`
-    : "?summary=true";
-
   try {
-    const res = await fetch(`/api/board${params}`);
-    const data: Board = await res.json();
+    const data = await fetchSummaryBoard("board");
+    ensureMobileBoardExpanded(data);
 
     renderProjectFilter(data.projects);
 
@@ -1063,17 +1808,31 @@ async function loadBoard() {
         col.key,
         col.label,
         col.icon,
-        data[col.key as keyof Omit<Board, "projects">]
+        data[col.key as keyof Omit<Board, "projects" | "counts">],
+        data.counts?.[col.key as ColumnKey] ?? data[col.key as keyof Omit<Board, "projects" | "counts">].length
       )
     ).join("");
 
-    const total = data.todo.length + data.plan.length + data.plan_review.length +
-      data.impl.length + data.impl_review.length + data.test.length + data.done.length;
+    const doneCount = data.counts?.done ?? data.done.length;
+    const total = data.total ?? (
+      (data.counts?.todo ?? data.todo.length) +
+      (data.counts?.plan ?? data.plan.length) +
+      (data.counts?.plan_review ?? data.plan_review.length) +
+      (data.counts?.impl ?? data.impl.length) +
+      (data.counts?.impl_review ?? data.impl_review.length) +
+      (data.counts?.test ?? data.test.length) +
+      (data.counts?.done ?? data.done.length)
+    );
     document.getElementById("count-summary")!.textContent =
-      `${data.done.length}/${total} completed`;
+      `${doneCount}/${total} completed`;
 
     board.querySelectorAll(".card").forEach((el) => {
       el.addEventListener("click", (e) => {
+        const interactive = (e.target as HTMLElement).closest(".card-interactive");
+        if (interactive) {
+          e.stopPropagation();
+          return;
+        }
         const copyBtn = (e.target as HTMLElement).closest(".card-copy-btn") as HTMLElement | null;
         if (copyBtn) {
           e.stopPropagation();
@@ -1090,7 +1849,10 @@ async function loadBoard() {
       });
     });
 
-    setupDragAndDrop();
+    if (!isMobileViewport) {
+      setupDragAndDrop();
+    }
+    setupMobileBoardInteractions();
     applySearchFilter();
 
     const addBtn = document.getElementById("add-card-btn");
@@ -1098,6 +1860,7 @@ async function loadBoard() {
       addBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         document.getElementById("add-card-overlay")!.classList.remove("hidden");
+        syncOverlayState();
         (document.getElementById("add-title") as HTMLInputElement).focus();
       });
     }
@@ -1111,22 +1874,57 @@ async function loadBoard() {
   }
 }
 
+function setupMobileBoardInteractions() {
+  document.querySelectorAll<HTMLButtonElement>("[data-column-toggle]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      if (!isMobileViewport) return;
+      event.stopPropagation();
+      const columnKey = button.dataset.columnToggle;
+      if (!columnKey) return;
+      if (mobileBoardExpanded.has(columnKey)) {
+        mobileBoardExpanded.delete(columnKey);
+      } else {
+        mobileBoardExpanded.add(columnKey);
+      }
+      persistMobileBoardExpanded();
+      const column = button.closest(".column");
+      const expanded = mobileBoardExpanded.has(columnKey) || Boolean(currentSearch.trim());
+      if (column) {
+        column.setAttribute("data-mobile-expanded", String(expanded));
+      }
+      button.setAttribute("aria-expanded", String(expanded));
+      const icon = button.querySelector(".column-toggle-icon");
+      if (icon) {
+        icon.textContent = expanded ? "−" : "+";
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLSelectElement>(".mobile-status-select").forEach((select) => {
+    select.addEventListener("click", (event) => event.stopPropagation());
+    select.addEventListener("change", async (event) => {
+      event.stopPropagation();
+      const nextStatus = select.value;
+      const taskId = parseInt(select.dataset.id || "", 10);
+      const project = select.dataset.project || "";
+      const currentStatus = select.dataset.currentStatus || "";
+      if (!taskId || !project) return;
+      await moveTaskStatus({ id: taskId, project, status: currentStatus }, nextStatus);
+    });
+  });
+}
+
 async function loadListView() {
   const listView = document.getElementById("list-view")!;
-  const params = currentProject
-    ? `?project=${encodeURIComponent(currentProject)}&summary=true`
-    : "?summary=true";
-
   try {
-    const res = await fetch(`/api/board${params}`);
-    const data: Board = await res.json();
+    const data = await fetchSummaryBoard("full");
 
     renderProjectFilter(data.projects);
 
     // Flatten all tasks from all columns
     const allTasks: Task[] = [];
     for (const col of COLUMNS) {
-      for (const t of data[col.key as keyof Omit<Board, "projects">]) {
+      for (const t of data[col.key as keyof Omit<Board, "projects" | "counts">]) {
         allTasks.push(t);
       }
     }
@@ -1177,24 +1975,30 @@ async function loadListView() {
         </tr>
       `;
     }).join("");
+    const mobileCards = displayTasks.map(renderMobileListCard).join("");
 
     listView.innerHTML = `
-      <table class="list-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Title</th>
-            <th>Status</th>
-            <th>Level</th>
-            <th>Priority</th>
-            <th>Project</th>
-            <th>Tags</th>
-            <th>Created</th>
-            <th>Completed</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="list-view-shell">
+        <div class="list-cards" data-mobile-list>
+          ${mobileCards || '<div class="empty">No items</div>'}
+        </div>
+        <table class="list-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Title</th>
+              <th>Status</th>
+              <th>Level</th>
+              <th>Priority</th>
+              <th>Project</th>
+              <th>Tags</th>
+              <th>Created</th>
+              <th>Completed</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     `;
 
     // Inline edit handlers for selects
@@ -1209,7 +2013,7 @@ async function loadListView() {
 
         const row = el.closest("tr") as HTMLElement | null;
         const project = row?.dataset.project || "";
-        const resp = await fetch(`/api/task/${taskId}?project=${encodeURIComponent(project)}`, {
+        const resp = await apiFetch(`/api/task/${taskId}?project=${encodeURIComponent(project)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ [field]: value }),
@@ -1221,6 +2025,7 @@ async function loadListView() {
           loadListView(); // Revert on error
           return;
         }
+        invalidateSummaryCaches(project);
         loadListView();
       });
     });
@@ -1229,9 +2034,9 @@ async function loadListView() {
     listView.querySelectorAll(".col-title").forEach((el) => {
       el.addEventListener("click", (e) => {
         e.stopPropagation();
-        const row = (el as HTMLElement).closest("tr")! as HTMLElement;
-        const id = parseInt(row.dataset.id!);
-        const project = row.dataset.project;
+        const host = (el as HTMLElement).closest("[data-id]")! as HTMLElement;
+        const id = parseInt(host.dataset.id!);
+        const project = host.dataset.project;
         showTaskDetail(id, project);
       });
     });
@@ -1277,6 +2082,8 @@ function renderProjectFilter(projects: string[]) {
     } else {
       localStorage.removeItem('kanban-project');
     }
+    currentBoardVersion = null;
+    currentBoardVersionEtag = null;
     refreshCurrentView();
   });
 }
@@ -1370,7 +2177,7 @@ function setupDragAndDrop() {
         afterId = parseInt((cardsInCol[cardsInCol.length - 1] as HTMLElement).dataset.id!);
       }
 
-      const resp = await fetch(`/api/task/${id}/reorder?project=${encodeURIComponent(dragProject)}`, {
+      const resp = await apiFetch(`/api/task/${id}/reorder?project=${encodeURIComponent(dragProject)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus, afterId, beforeId }),
@@ -1383,6 +2190,7 @@ function setupDragAndDrop() {
           showToast(err.error);
         }
       }
+      invalidateSummaryCaches(dragProject);
       loadBoard();
     });
   });
@@ -1399,19 +2207,22 @@ function showToast(message: string) {
   setTimeout(() => toast.remove(), 3000);
 }
 
-// Set tab title to project name
-fetch("/api/info")
-  .then((r) => r.json())
-  .then((info: { projectName: string }) => {
+async function loadProjectInfo() {
+  try {
+    const response = await apiFetch("/api/info");
+    const info = await response.json() as { projectName?: string };
     if (info.projectName) {
       document.title = `Kanban \u00b7 ${info.projectName}`;
       document.querySelector("header h1")!.textContent = `Kanban \u00b7 ${info.projectName}`;
     }
-  })
-  .catch(() => {});
+  } catch {
+    // Auth-gated boards keep the default title until unlocked.
+  }
+}
 
 function switchView(view: "board" | "list" | "chronicle") {
   currentView = view;
+  localStorage.setItem(VIEW_STORAGE_KEY, currentView);
   const boardEl = document.getElementById("board")!;
   const listEl = document.getElementById("list-view")!;
   const chronicleEl = document.getElementById("chronicle-view")!;
@@ -1445,22 +2256,82 @@ function refreshCurrentView() {
   else loadChronicleView();
 }
 
-// Init
-loadBoard();
-
 // Restore persisted UI state
 (document.getElementById("sort-select") as HTMLSelectElement).value = currentSort;
 if (hideOldDone) {
   document.getElementById("hide-done-btn")!.classList.add("active");
 }
 
+updateAuthButton();
+updateMobileShellState();
+
+document.getElementById("auth-btn")!.addEventListener("click", () => {
+  if (authRequired && authReady) {
+    showAuthOverlay("Shared token is stored on this device. Use Forget Token to reset it.", "success");
+    return;
+  }
+  showAuthOverlay(authRequired ? "Enter the shared access token to load the board." : "This environment does not require a shared token.");
+});
+
+document.getElementById("auth-close")!.addEventListener("click", () => {
+  if (authRequired && !authReady) return;
+  hideAuthOverlay();
+});
+
+document.getElementById("auth-clear-btn")!.addEventListener("click", async () => {
+  await clearAuthSession();
+  if (authRequired) {
+    showAuthOverlay("Stored token cleared. Enter a shared access token to continue.");
+  } else {
+    hideAuthOverlay();
+    setAuthMessage("Stored token cleared.");
+  }
+});
+
+document.getElementById("auth-form")!.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = document.getElementById("auth-token-input") as HTMLInputElement;
+  const token = input.value.trim();
+  if (!token) {
+    setAuthMessage("Enter the shared access token.", "error");
+    return;
+  }
+  setAuthMessage("Unlocking board...", "default");
+  try {
+    await establishAuthSession(token);
+    setAuthMessage("Board unlocked.", "success");
+    await loadProjectInfo();
+    ensureRealtimeSync();
+    refreshCurrentView();
+  } catch (error) {
+    setAuthMessage(error instanceof Error ? error.message : "Board authentication failed.", "error");
+  }
+});
+
 // Tab switching
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
 document.getElementById("tab-chronicle")!.addEventListener("click", () => switchView("chronicle"));
 
+document.getElementById("toolbar-mobile-toggle")!.addEventListener("click", () => {
+  mobileFiltersOpen = !mobileFiltersOpen;
+  updateMobileShellState();
+});
+
+MOBILE_MEDIA_QUERY.addEventListener("change", (event) => {
+  syncViewportState(event.matches);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !authReady) return;
+  clearBoardCaches();
+  refreshCurrentView();
+});
+
 // SSE: server pushes refresh events on any data mutation
 function connectSSE() {
+  if (sseConnected) return;
+  sseConnected = true;
   const es = new EventSource("/api/events");
   es.onmessage = () => {
     if (isDragging) return;
@@ -1468,9 +2339,14 @@ function connectSSE() {
     const addOpen = !document.getElementById("add-card-overlay")!.classList.contains("hidden");
     if (!detailOpen && !addOpen) refreshCurrentView();
   };
-  es.onerror = () => { es.close(); setTimeout(connectSSE, 5000); };
+  es.onerror = () => {
+    es.close();
+    sseConnected = false;
+    if (!authRequired || authReady) {
+      setTimeout(connectSSE, 5000);
+    }
+  };
 }
-connectSSE();
 
 // Refresh button
 document.getElementById("refresh-btn")!.addEventListener("click", refreshCurrentView);
@@ -1478,6 +2354,10 @@ document.getElementById("refresh-btn")!.addEventListener("click", refreshCurrent
 // Search — DOM filter, no API re-fetch
 document.getElementById("search-input")!.addEventListener("input", (e) => {
   currentSearch = (e.target as HTMLInputElement).value.trim();
+  if (currentView === "board" && isMobileViewport) {
+    loadBoard();
+    return;
+  }
   applySearchFilter();
 });
 
@@ -1499,16 +2379,22 @@ document.getElementById("hide-done-btn")!.addEventListener("click", () => {
 // Close modal
 document.getElementById("modal-close")!.addEventListener("click", () => {
   document.getElementById("modal-overlay")!.classList.add("hidden");
+  syncOverlayState();
 });
 document.getElementById("modal-overlay")!.addEventListener("click", (e) => {
   if (e.target === e.currentTarget) {
     document.getElementById("modal-overlay")!.classList.add("hidden");
+    syncOverlayState();
   }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     document.getElementById("modal-overlay")!.classList.add("hidden");
     document.getElementById("add-card-overlay")!.classList.add("hidden");
+    if (!document.getElementById("auth-overlay")!.classList.contains("hidden") && authReady) {
+      hideAuthOverlay();
+    }
+    syncOverlayState();
   }
 });
 
@@ -1550,12 +2436,14 @@ document.getElementById("add-card-close")!.addEventListener("click", () => {
   addCardOverlay.classList.add("hidden");
   pendingFiles = [];
   renderAddAttachmentPreview();
+  syncOverlayState();
 });
 addCardOverlay.addEventListener("click", (e) => {
   if (e.target === e.currentTarget) {
     addCardOverlay.classList.add("hidden");
     pendingFiles = [];
     renderAddAttachmentPreview();
+    syncOverlayState();
   }
 });
 
@@ -1602,7 +2490,7 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
   submitBtn.textContent = pendingFiles.length > 0 ? "Creating..." : "Add Card";
   submitBtn.disabled = true;
 
-  const res = await fetch("/api/task", {
+  const res = await apiFetch("/api/task", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title, priority, level, description, tags, project }),
@@ -1620,5 +2508,20 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
   (document.getElementById("add-card-form") as HTMLFormElement).reset();
   renderAddAttachmentPreview();
   addCardOverlay.classList.add("hidden");
+  syncOverlayState();
+  invalidateSummaryCaches(project);
   refreshCurrentView();
 });
+
+bootstrapAuth()
+  .then(async (ready) => {
+    if (!ready) return;
+    await loadProjectInfo();
+    switchView(currentView);
+    ensureRealtimeSync();
+  })
+  .catch(() => {
+    showAuthOverlay("Unable to initialize board authentication.", "error");
+  });
+
+registerServiceWorker();

@@ -10,9 +10,32 @@ Read project config from `.codex/kanban.json` or `.claude/kanban.json` (created 
 ```bash
 CONFIG=$(cat .codex/kanban.json 2>/dev/null || cat .claude/kanban.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
+BASE_URL=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url') or 'http://localhost:5173')" 2>/dev/null || echo "http://localhost:5173")
+AUTH_TOKEN=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth_token') or '')" 2>/dev/null || true)
+AUTH_HEADER=()
+if [ -n "$AUTH_TOKEN" ]; then
+  AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
+fi
 ```
 
-If neither config file exists, prompt user to run `/kanban-init`, or fall back to `basename "$(pwd)"`.
+If neither config file exists, prompt user to run `/kanban-init`, or fall back to:
+
+```bash
+PROJECT=$(basename "$(pwd)")
+BASE_URL="http://localhost:5173"
+AUTH_TOKEN=""
+AUTH_HEADER=()
+```
+
+Legacy configs containing only `{ "project": "..." }` remain valid. In that case, treat `base_url` as `http://localhost:5173` and `auth_token` as empty.
+
+Quick debug check before a failing request:
+
+```bash
+echo "KANBAN_PROJECT=$PROJECT"
+echo "KANBAN_BASE_URL=$BASE_URL"
+echo "KANBAN_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
+```
 
 ## Pipeline Levels
 
@@ -56,62 +79,64 @@ done        → (terminal)
 
 ## API Access
 
-All DB operations go through the kanban-board HTTP API (`http://localhost:5173`).
-Start the server with `./kanban-board/start.sh` before using any kanban commands.
+All DB operations go through the kanban-board HTTP API (`$BASE_URL`).
+Start the server with `./kanban-board/start.sh` before using any kanban commands when `BASE_URL` points to localhost.
 
 ### API Endpoints
 
 ```bash
 # Board — full (web UI, task detail views)
-curl -s "http://localhost:5173/api/board?project=$PROJECT"
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT"
 
 # Board — summary (list/stats/context — excludes large TEXT fields)
-curl -s "http://localhost:5173/api/board?project=$PROJECT&summary=true"
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
 
 # Read task — full
-curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT"
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT"
 
 # Read task — agent-specific fields only (always includes id, project, status)
-curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT&fields=title,description,plan"
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=title,description,plan"
 
 # Update task fields / status
-curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"plan": "...", "status": "plan_review"}'
 
 # Create task
-curl -s -X POST http://localhost:5173/api/task \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
   -H 'Content-Type: application/json' \
   -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"level\": 3, \"description\": \"...\"}"
 
 # Plan review result
-curl -s -X POST "http://localhost:5173/api/task/$ID/plan-review?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "..."}'
 
 # Impl review result
-curl -s -X POST "http://localhost:5173/api/task/$ID/review?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "..."}'
 
 # Test result
-curl -s -X POST "http://localhost:5173/api/task/$ID/test-result?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/test-result?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
 
 # Add note
-curl -s -X POST "http://localhost:5173/api/task/$ID/note?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"content": "Commit: abc1234"}'
 
 # Reorder
-curl -s -X PATCH "http://localhost:5173/api/task/$ID/reorder?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "plan", "afterId": null, "beforeId": null}'
 
 # Delete
-curl -s -X DELETE "http://localhost:5173/api/task/$ID?project=$PROJECT"
+curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
 ```
+
+If `AUTH_TOKEN` is set, keep using the shared `AUTH_HEADER` array so every request can target the same protected board deployment without repeating conditional header logic.
 
 > For full schema, column descriptions, and JSON field formats, read `schema.md`.
 
@@ -127,7 +152,7 @@ PAYLOAD=$(jq -n \
   --arg description "$DESCRIPTION" \
   --argjson level 2 \
   '{title: $title, project: $project, priority: "medium", level: $level, description: $description}')
-curl -s -X POST http://localhost:5173/api/task \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
   -H 'Content-Type: application/json' \
   -d "$PAYLOAD"
 ```
@@ -139,8 +164,8 @@ Or use Python `json.dumps()` to serialize the body safely.
 > **CRITICAL: If the API call fails, NEVER fall back to SQLite or any direct DB access.**
 > The kanban DB is Neon PostgreSQL — there is no local SQLite file. Fix the API call and retry.
 
-- **Server not running**: Run `./kanban-board/start.sh` first and retry
-- **API error**: Debug the request (check JSON validity, PROJECT variable) — do NOT bypass the API
+- **Server not running**: Run `./kanban-board/start.sh` first and retry when using localhost
+- **API error**: Debug the request (check JSON validity, `PROJECT`, `BASE_URL`, and whether `AUTH_TOKEN` is configured) — do NOT bypass the API
 - **Agent failure**: 1 retry on first failure; 2nd failure → keep status, log to `agent_log`, notify user
 - **Plan review loop**: `plan_review_count > 3` → circuit breaker, ask user
 - **Impl review loop**: `impl_review_count > 3` → circuit breaker, ask user

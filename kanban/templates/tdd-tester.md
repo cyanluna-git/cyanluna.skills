@@ -47,9 +47,9 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SHIELD_NOTES="\n\n---\n> **Shield** \`<MODEL_SHIELD>\` · $TIMESTAMP\n\n<TEST_NOTES_MARKDOWN>"
 
 # Append Shield's notes to existing implementation_notes
-EXISTING=$(curl -s "http://localhost:5173/api/task/<ID>?project=<PROJECT>" | jq -r '.implementation_notes // ""')
+EXISTING=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/<ID>?project=<PROJECT>" | jq -r '.implementation_notes // ""')
 
-curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d "{\"implementation_notes\": \"$EXISTING$SHIELD_NOTES\", \"current_agent\": null}"
 ```

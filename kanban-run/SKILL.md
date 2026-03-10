@@ -101,7 +101,7 @@ EFFORT_RANGER=$(read_effort ranger)
 
 ```bash
 # 1. Read current task state (status + level only)
-TASK=$(curl -s "http://localhost:5173/api/task/$ID?project=$PROJECT&fields=status,level")
+TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
 STATUS=$(echo "$TASK" | jq -r '.status')
 
 # 2. Dispatch agent (see Agent Dispatch below)
@@ -240,7 +240,7 @@ Template files are at `../kanban/templates/`.
 
 After Builder + Shield both complete, move to `impl_review`:
 ```bash
-curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "impl_review", "current_agent": null}'
 ```
@@ -259,12 +259,12 @@ fi
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "no-git")
 
 # 2. Move to done
-curl -s -X PATCH "http://localhost:5173/api/task/$ID?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "done"}'
 
 # 3. Record commit hash in notes
-curl -s -X POST "http://localhost:5173/api/task/$ID/note?project=$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "{\"content\": \"Commit: $COMMIT_HASH\"}"
 ```

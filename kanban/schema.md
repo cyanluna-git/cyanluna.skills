@@ -149,7 +149,7 @@ After each agent completes, the orchestrator appends a signed entry:
 ```python
 python3 -c "
 import subprocess, json, datetime
-d = json.loads(subprocess.run(['curl','-s','http://localhost:5173/api/task/$ID?project=$PROJECT'], capture_output=True, text=True).stdout)
+d = json.loads(subprocess.run(['curl','-s',f'{base_url}/api/task/{task_id}?project={project}', *auth_header], capture_output=True, text=True).stdout)
 log = json.loads(d.get('agent_log') or '[]')
 log.append({
   'agent': 'NICKNAME',
@@ -157,7 +157,7 @@ log.append({
   'message': 'MESSAGE',
   'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'
 })
-subprocess.run(['curl','-s','-X','PATCH','http://localhost:5173/api/task/$ID?project=$PROJECT','-H','Content-Type: application/json','-d',json.dumps({'agent_log':json.dumps(log)})], capture_output=True)
+subprocess.run(['curl','-s',*auth_header,'-X','PATCH',f'{base_url}/api/task/{task_id}?project={project}','-H','Content-Type: application/json','-d',json.dumps({'agent_log':json.dumps(log)})], capture_output=True)
 "
 ```
 

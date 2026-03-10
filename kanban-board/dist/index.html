@@ -4,15 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kanban Board</title>
+    <meta name="theme-color" content="#1e293b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Kanban Board" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/assets/favicon-Dh9XFatv.svg" />
-    <script type="module" crossorigin src="/assets/index-DFlYSiHI.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-C7on-ro_.css">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script type="module" crossorigin src="/assets/index-C47yyo9W.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Di8HgZFz.css">
   </head>
   <body>
     <header>
       <div class="header-left">
         <h1>Kanban Board</h1>
-        <div id="project-filter"></div>
       </div>
       <div class="header-tabs">
         <button class="tab-btn active" id="tab-board">Board</button>
@@ -20,38 +25,58 @@
         <button class="tab-btn" id="tab-chronicle">Chronicle</button>
       </div>
       <div class="header-meta">
+        <button id="auth-btn" class="toolbar-toggle-btn" title="Shared token access">Private</button>
         <span id="count-summary"></span>
         <button id="refresh-btn" title="Refresh">&#x21bb;</button>
       </div>
     </header>
     <div class="toolbar">
-      <input type="search" id="search-input" placeholder="Search tasks…" autocomplete="off" />
-      <select id="sort-select">
-        <option value="default">Sort: Rank</option>
-        <option value="created_desc">Created ↓ Newest</option>
-        <option value="created_asc">Created ↑ Oldest</option>
-        <option value="completed_desc">Completed ↓</option>
-      </select>
-      <button id="hide-done-btn" class="toolbar-toggle-btn" title="Hide Done items completed more than 3 days ago">
-        Hide old ✅ (3d+)
-      </button>
-      <button id="chronicle-agent-btn" class="toolbar-toggle-btn">Agent Activity</button>
+      <div class="toolbar-primary">
+        <button id="toolbar-mobile-toggle" class="toolbar-toggle-btn toolbar-mobile-toggle" title="Show filters">
+          Filters
+        </button>
+        <input type="search" id="search-input" placeholder="Search tasks…" autocomplete="off" />
+      </div>
+      <div class="toolbar-secondary" id="toolbar-secondary">
+        <div id="project-filter"></div>
+        <select id="sort-select">
+          <option value="default">Sort: Rank</option>
+          <option value="created_desc">Created ↓ Newest</option>
+          <option value="created_asc">Created ↑ Oldest</option>
+          <option value="completed_desc">Completed ↓</option>
+        </select>
+        <button id="hide-done-btn" class="toolbar-toggle-btn" title="Hide Done items completed more than 3 days ago">
+          Hide old ✅ (3d+)
+        </button>
+      </div>
     </div>
     <main id="board"></main>
     <main id="list-view" class="hidden"></main>
     <main id="chronicle-view" class="hidden"></main>
     <!-- Modal -->
-    <div id="modal-overlay" class="modal-overlay hidden">
-      <div class="modal">
-        <button class="modal-close" id="modal-close">&times;</button>
+    <div id="modal-overlay" class="modal-overlay overlay-detail hidden">
+      <div class="modal detail-modal">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="modal-sheet-header">
+          <div class="modal-sheet-copy">
+            <span class="modal-sheet-kicker">Task Detail</span>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close detail view">&times;</button>
+        </div>
         <div id="modal-content"></div>
       </div>
     </div>
     <!-- Add Card Modal -->
-    <div id="add-card-overlay" class="modal-overlay hidden">
-      <div class="modal" style="max-width:480px">
-        <button class="modal-close" id="add-card-close">&times;</button>
-        <h1 style="font-size:1.1rem;color:#f8fafc;margin-bottom:16px">New Card</h1>
+    <div id="add-card-overlay" class="modal-overlay overlay-add hidden">
+      <div class="modal add-card-modal">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="modal-sheet-header">
+          <div class="modal-sheet-copy">
+            <span class="modal-sheet-kicker">Create</span>
+            <h1 class="modal-sheet-title">New Card</h1>
+          </div>
+          <button class="modal-close" id="add-card-close" aria-label="Close new card form">&times;</button>
+        </div>
         <form id="add-card-form" autocomplete="off">
           <div class="form-group">
             <label for="add-title">Title *</label>
@@ -92,6 +117,32 @@
             <div class="attachments-grid" id="add-attachment-preview"></div>
           </div>
           <button type="submit" class="form-submit">Add Card</button>
+        </form>
+      </div>
+    </div>
+    <div id="auth-overlay" class="modal-overlay overlay-auth hidden">
+      <div class="modal auth-modal">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="modal-sheet-header auth-sheet-header">
+          <div class="modal-sheet-copy">
+            <span class="modal-sheet-kicker">Secure Access</span>
+            <h1 class="auth-title">Private Board</h1>
+          </div>
+          <button type="button" class="modal-close auth-close" id="auth-close" aria-label="Close token prompt">&times;</button>
+        </div>
+        <p class="auth-copy">
+          Enter the shared access token. It stays on this device and is used to unlock the board API.
+        </p>
+        <form id="auth-form" autocomplete="off">
+          <div class="form-group">
+            <label for="auth-token-input">Shared token</label>
+            <input type="password" id="auth-token-input" placeholder="Paste shared token" />
+          </div>
+          <p id="auth-message" class="auth-message"></p>
+          <div class="auth-actions">
+            <button type="submit" class="form-submit">Unlock Board</button>
+            <button type="button" id="auth-clear-btn" class="auth-secondary-btn">Forget Token</button>
+          </div>
         </form>
       </div>
     </div>

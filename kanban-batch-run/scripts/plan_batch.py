@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
+import pathlib
 import re
+import ssl
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - optional dependency
+    certifi = None
 
 
 PHASE_RE = re.compile(r"(?:^|,)\s*phase:(\d+)\s*(?:,|$)")
@@ -29,6 +37,37 @@ HOTSPOT_HINTS = {
     "migration",
     "api",
 }
+
+
+def load_project_config(project: str) -> dict:
+    candidates = []
+    cwd = pathlib.Path.cwd().resolve()
+    for directory in (cwd, *cwd.parents):
+        candidates.append(directory / ".codex" / "kanban.json")
+        candidates.append(directory / ".claude" / "kanban.json")
+
+    seen: set[pathlib.Path] = set()
+    for path in candidates:
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("project") not in {None, "", project}:
+            continue
+        return data
+
+    return {}
+
+
+def build_ssl_context() -> ssl.SSLContext:
+    if certifi is not None:
+        return ssl.create_default_context(cafile=certifi.where())
+    return ssl.create_default_context()
 
 
 def expand_selector(raw: str) -> list[int]:
@@ -57,16 +96,29 @@ def expand_selector(raw: str) -> list[int]:
     return ids
 
 
-def fetch_task(base_url: str, project: str, task_id: int) -> dict:
+def fetch_task(
+    base_url: str,
+    project: str,
+    task_id: int,
+    auth_token: str = "",
+    ssl_context: ssl.SSLContext | None = None,
+) -> dict:
     url = f"{base_url}/api/task/{task_id}?project={urllib.parse.quote(project)}"
+    auth_state = "present" if auth_token else "missing"
+    request = urllib.request.Request(url)
+    if auth_token:
+        request.add_header("X-Kanban-Auth", auth_token)
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=10, context=ssl_context) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
-        raise SystemExit(f"failed to fetch task {task_id}: HTTP {exc.code}") from exc
+        raise SystemExit(
+            f"failed to fetch task {task_id} from {url}: HTTP {exc.code} "
+            f"(auth_token={auth_state})"
+        ) from exc
     except urllib.error.URLError as exc:
         raise SystemExit(
-            f"failed to connect to {base_url} for task {task_id}: {exc.reason}\n"
+            f"failed to connect to {url}: {exc.reason} (auth_token={auth_state})\n"
             "Is the kanban-board server running? Start it with: ./kanban-board/start.sh"
         ) from exc
 
@@ -284,20 +336,39 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
     parser.add_argument("--tasks", required=True, help="e.g. 500-504 or 500,501,504")
-    parser.add_argument("--base-url", default="http://localhost:5173")
+    parser.add_argument("--base-url")
+    parser.add_argument("--auth-token")
     args = parser.parse_args()
+
+    config = load_project_config(args.project)
+    ssl_context = build_ssl_context()
+    base_url = (
+        args.base_url
+        or os.environ.get("KANBAN_BASE_URL")
+        or config.get("base_url")
+        or "http://localhost:5173"
+    )
+    auth_token = (
+        args.auth_token
+        if args.auth_token is not None
+        else os.environ.get("KANBAN_AUTH_TOKEN") or config.get("auth_token") or ""
+    )
 
     task_ids = expand_selector(args.tasks)
     if not task_ids:
         raise SystemExit("no task ids resolved")
 
     input_order = {task_id: index for index, task_id in enumerate(task_ids)}
-    raw_tasks = [fetch_task(args.base_url, args.project, task_id) for task_id in task_ids]
+    raw_tasks = [
+        fetch_task(base_url, args.project, task_id, auth_token, ssl_context)
+        for task_id in task_ids
+    ]
     tasks = [infer_task(task) for task in raw_tasks]
     ordered = sorted(tasks, key=lambda task: task_sort_key(task, input_order))
 
     payload = {
         "project": args.project,
+        "base_url": base_url,
         "task_ids": task_ids,
         "ordered_tasks": ordered,
         "candidate_groups": build_groups(ordered),

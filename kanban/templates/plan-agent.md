@@ -58,7 +58,7 @@ Write a markdown plan with your signature header at the top:
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Write signed plan and advance status
-curl -s -X PATCH "http://localhost:5173/api/task/<ID>?project=<PROJECT>" \
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"status\": \"plan_review\", \"current_agent\": null}"
 ```

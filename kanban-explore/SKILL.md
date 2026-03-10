@@ -4,7 +4,7 @@ description: Codebase exploration skill for uncertain implementation direction. 
 license: MIT
 ---
 
-> Shared context: read `~/.claude/skills/kanban/shared.md` for DB path, pipeline levels, status transitions, API endpoints, and error handling.
+> Shared context: read `../kanban/shared.md` for DB path, pipeline levels, status transitions, API endpoints, and error handling.
 
 ## `/kanban-explore [topic]` — Explore & Plan
 
