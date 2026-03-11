@@ -440,7 +440,14 @@ async function readBoardVersion(projectOverride: string | null = currentProject)
 }
 
 function currentViewUsesSummaryMode(mode: SummaryMode): boolean {
-  return mode === "board" ? currentView === "board" : currentView === "list" || currentView === "chronicle";
+  if (mode === "board") {
+    return currentView === "board" && !shouldLoadExpandedBoardSummary();
+  }
+  return currentView === "list" || currentView === "chronicle" || (currentView === "board" && shouldLoadExpandedBoardSummary());
+}
+
+function shouldLoadExpandedBoardSummary(): boolean {
+  return currentSearch.trim().length > 0;
 }
 
 function revalidateSummaryCache(mode: SummaryMode, cacheKey: string, cachedVersion: string | null, projectOverride: string | null) {
@@ -1798,7 +1805,7 @@ async function loadChronicleView() {
 async function loadBoard() {
   const board = document.getElementById("board")!;
   try {
-    const data = await fetchSummaryBoard("board");
+    const data = await fetchSummaryBoard(shouldLoadExpandedBoardSummary() ? "full" : "board");
     ensureMobileBoardExpanded(data);
 
     renderProjectFilter(data.projects);
@@ -1861,7 +1868,9 @@ async function loadBoard() {
         e.stopPropagation();
         document.getElementById("add-card-overlay")!.classList.remove("hidden");
         syncOverlayState();
-        (document.getElementById("add-title") as HTMLInputElement).focus();
+        if (!isMobileViewport) {
+          (document.getElementById("add-title") as HTMLInputElement).focus();
+        }
       });
     }
   } catch (err) {
@@ -2354,7 +2363,7 @@ document.getElementById("refresh-btn")!.addEventListener("click", refreshCurrent
 // Search — DOM filter, no API re-fetch
 document.getElementById("search-input")!.addEventListener("input", (e) => {
   currentSearch = (e.target as HTMLInputElement).value.trim();
-  if (currentView === "board" && isMobileViewport) {
+  if (currentView === "board") {
     loadBoard();
     return;
   }

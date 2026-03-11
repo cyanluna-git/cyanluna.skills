@@ -1592,6 +1592,18 @@ details.phase-agent-log[open] > summary::before {
     font-size: 0.8rem;
     line-height: 1.6;
   }
+  .form-group input[type="text"],
+  .form-group textarea,
+  .form-group select {
+    font-size: 16px;
+  }
+  .form-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .attachment-drop-zone {
+    overflow-wrap: anywhere;
+  }
   .auth-actions {
     flex-direction: column;
     align-items: stretch;
