@@ -5,13 +5,31 @@ All projects share a single centralized DB — the kanban-board server must be r
 
 ## DB Path & Project Config
 
-Read project config from `.codex/kanban.json` or `.claude/kanban.json` (created by `/kanban-init`):
+Read project config from `.codex/kanban.json` or `.claude/kanban.json` (created by `/kanban-init`).
+Auth credentials are loaded from the global `~/.claude/kanban-auth` file (shared across all projects).
 
 ```bash
+# 1. Project config (project name only)
 CONFIG=$(cat .codex/kanban.json 2>/dev/null || cat .claude/kanban.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
-BASE_URL=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url') or 'http://localhost:5173')" 2>/dev/null || echo "http://localhost:5173")
-AUTH_TOKEN=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth_token') or '')" 2>/dev/null || true)
+
+# 2. Auth from ~/.claude/kanban-auth (global, shared across projects)
+KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
+if [ -f "$KANBAN_AUTH_FILE" ]; then
+  BASE_URL=$(grep '^KANBAN_BASE_URL=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
+  AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
+fi
+
+# 3. Fallback: legacy kanban.json with embedded auth (backward compat)
+if [ -z "${BASE_URL:-}" ]; then
+  BASE_URL=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url') or '')" 2>/dev/null || true)
+fi
+if [ -z "${AUTH_TOKEN:-}" ]; then
+  AUTH_TOKEN=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth_token') or '')" 2>/dev/null || true)
+fi
+
+# 4. Defaults
+BASE_URL="${BASE_URL:-http://localhost:5173}"
 AUTH_HEADER=()
 if [ -n "$AUTH_TOKEN" ]; then
   AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
@@ -27,7 +45,8 @@ AUTH_TOKEN=""
 AUTH_HEADER=()
 ```
 
-Legacy configs containing only `{ "project": "..." }` remain valid. In that case, treat `base_url` as `http://localhost:5173` and `auth_token` as empty.
+**Auth resolution priority:** `~/.claude/kanban-auth` > kanban.json (legacy) > defaults.
+`kanban.json` should only contain `{ "project": "..." }`. The `auth_token` and `base_url` fields in kanban.json are supported for backward compatibility but deprecated.
 
 Quick debug check before a failing request:
 
@@ -35,6 +54,7 @@ Quick debug check before a failing request:
 echo "KANBAN_PROJECT=$PROJECT"
 echo "KANBAN_BASE_URL=$BASE_URL"
 echo "KANBAN_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
+echo "KANBAN_AUTH_SOURCE=$([ -f "$HOME/.claude/kanban-auth" ] && echo kanban-auth || echo kanban.json)"
 ```
 
 ## Pipeline Levels

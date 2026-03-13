@@ -39,6 +39,25 @@ HOTSPOT_HINTS = {
 }
 
 
+def load_kanban_auth() -> dict[str, str]:
+    """Load global auth from ~/.claude/kanban-auth."""
+    auth_file = pathlib.Path.home() / ".claude" / "kanban-auth"
+    result: dict[str, str] = {}
+    if not auth_file.is_file():
+        return result
+    try:
+        for line in auth_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                result[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return result
+
+
 def load_project_config(project: str) -> dict:
     candidates = []
     cwd = pathlib.Path.cwd().resolve()
@@ -341,17 +360,22 @@ def main() -> int:
     args = parser.parse_args()
 
     config = load_project_config(args.project)
+    kanban_auth = load_kanban_auth()
     ssl_context = build_ssl_context()
     base_url = (
         args.base_url
         or os.environ.get("KANBAN_BASE_URL")
+        or kanban_auth.get("KANBAN_BASE_URL")
         or config.get("base_url")
         or "http://localhost:5173"
     )
     auth_token = (
         args.auth_token
         if args.auth_token is not None
-        else os.environ.get("KANBAN_AUTH_TOKEN") or config.get("auth_token") or ""
+        else os.environ.get("KANBAN_AUTH_TOKEN")
+        or kanban_auth.get("KANBAN_AUTH_TOKEN")
+        or config.get("auth_token")
+        or ""
     )
 
     task_ids = expand_selector(args.tasks)
