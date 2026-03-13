@@ -44,12 +44,9 @@ else
   BASE_URL="${ARG2:-http://localhost:5173}"
 fi
 
-# Optional shared token for private remote boards
-AUTH_TOKEN="${KANBAN_AUTH_TOKEN:-}"
 ```
 
 **Always strip `.db` suffix** — old configs stored the DB filename as the project name (e.g. `cpet.db`), which would conflict without this fix.
-If no board URL is provided, default to `http://localhost:5173`.
 
 ### 2. Write local project config
 
@@ -59,22 +56,30 @@ Create both config files in the **current project root**:
 
 ```json
 {
-  "project": "<PROJECT_NAME>",
-  "base_url": "<BASE_URL>",
-  "auth_token": "<OPTIONAL_AUTH_TOKEN>"
+  "project": "<PROJECT_NAME>"
 }
 ```
 
-`auth_token` is optional. Omit it when not provided.
+**kanban.json stores ONLY the project name.** Auth credentials (`base_url`, `auth_token`) are stored separately in `~/.claude/kanban-auth`.
 
-Use the Write tool to create both files with the same content. Existing configs that only contain `{ "project": "..." }` remain valid and should still be treated as:
+Use the Write tool to create both files with the same content.
 
-```json
-{
-  "project": "<PROJECT_NAME>",
-  "base_url": "http://localhost:5173"
-}
+### 2b. Set up global auth (if not exists)
+
+Check if `~/.claude/kanban-auth` exists. If not, and a `BASE_URL` was provided:
+
+```bash
+KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
+if [ ! -f "$KANBAN_AUTH_FILE" ]; then
+  # Write global auth file
+  cat > "$KANBAN_AUTH_FILE" << EOF
+KANBAN_BASE_URL=$BASE_URL
+KANBAN_AUTH_TOKEN=${KANBAN_AUTH_TOKEN:-}
+EOF
+fi
 ```
+
+If `~/.claude/kanban-auth` already exists, show its current `KANBAN_BASE_URL` and confirm it matches. Do NOT overwrite without asking.
 
 ### 3. Create `kanban-board/start.sh`
 
@@ -110,7 +115,7 @@ Output:
   Config:  .codex/kanban.json, .claude/kanban.json
   DB:      Neon PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
-  Auth:    configured from KANBAN_AUTH_TOKEN (optional)
+  Auth:    ~/.claude/kanban-auth (global, shared across all projects)
   Start:   ./kanban-board/start.sh
 
 Add tasks with /kanban add <title>
@@ -122,9 +127,9 @@ Add tasks with /kanban add <title>
 
 If either `.codex/kanban.json` or `.claude/kanban.json` already exists:
 1. Read the `project` field and **strip `.db` suffix** (old format stored DB filename as project name)
-2. Preserve existing `base_url` and `auth_token` unless the user explicitly overwrites them
+2. If the config contains `base_url` or `auth_token`, migrate them to `~/.claude/kanban-auth` and remove from kanban.json
 3. If the cleaned name differs from what's stored (e.g. `cpet.db` → `cpet`), show the migration clearly
-3. Ask the user whether to overwrite or keep as-is:
+4. Ask the user whether to overwrite or keep as-is:
 
 ```
 .codex/kanban.json or .claude/kanban.json already exists:
@@ -140,4 +145,5 @@ Options:
 - The central board should exist in either `~/.codex/kanban-board/` or `~/.claude/kanban-board/`. If neither has `package.json`, warn the user.
 - `node_modules/` in the local `kanban-board/` is not created (no `pnpm install` needed — the central board handles its own deps).
 - The kanban-board server must be running (`./kanban-board/start.sh`) before using `/kanban` commands when `base_url` points at localhost.
-- For remote private boards, prefer setting `KANBAN_AUTH_TOKEN` in the shell before running `/kanban-init` so the token is not hardcoded into the skill prompt text.
+- Auth credentials are stored globally in `~/.claude/kanban-auth`, NOT in per-project kanban.json. This prevents token duplication across repos and keeps secrets out of git.
+- For remote private boards, set `KANBAN_AUTH_TOKEN` in the shell before running `/kanban-init`, or edit `~/.claude/kanban-auth` directly.
