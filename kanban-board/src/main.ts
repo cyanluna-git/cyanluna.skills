@@ -702,7 +702,7 @@ function sortTasks(tasks: Task[], status?: string): Task[] {
         return a.rank - b.rank || a.id - b.id;
       });
     }
-    return tasks;
+    return [...tasks].sort((a, b) => b.rank - a.rank || b.id - a.id);
   }
   return [...tasks].sort((a, b) => {
     if (currentSort === 'created_asc')  return a.created_at.localeCompare(b.created_at);
