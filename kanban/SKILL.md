@@ -63,6 +63,33 @@ echo "$BOARD" | jq '{
 }'
 ```
 
+### `/kanban project` — Current Project Context (AI Context Docking)
+
+Fetch the current project's context from the projects table. Use this at the start of a session to load project purpose, stack, relationships, and task counts in one call.
+
+```bash
+PROJECT_DATA=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT")
+```
+
+Output: formatted project context including:
+- **Purpose** (WHY this project exists)
+- **Stack** (technologies used)
+- **Category** and status
+- **Task counts** by status
+- **Links** to related projects
+
+If the project is not registered, suggest running `/kanban-init` to register it.
+
+### `/kanban project all` — Full Project Map
+
+Fetch all projects grouped by category. Useful for understanding the full project landscape.
+
+```bash
+ALL_PROJECTS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects")
+```
+
+Output: projects grouped by category (edwards, personal, tools, skills, community) with names and purposes.
+
 ## Setup & Web Board
 
 Run `/kanban-init` first to register this project.

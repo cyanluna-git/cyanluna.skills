@@ -158,6 +158,42 @@ curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
 
 If `AUTH_TOKEN` is set, keep using the shared `AUTH_HEADER` array so every request can target the same protected board deployment without repeating conditional header logic.
 
+### Projects API Endpoints
+
+```bash
+# List all projects with links
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects"
+
+# Get single project with task counts and links
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT"
+
+# Create/upsert project
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
+  -H 'Content-Type: application/json' \
+  -d '{"id": "my-project", "name": "My Project", "purpose": "...", "stack": "...", "category": "personal"}'
+
+# Update project fields
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"purpose": "updated purpose"}'
+
+# Delete project
+curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT"
+
+# List project links
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT/links"
+
+# Create project link
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects/$PROJECT/links" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_id": "other-project", "relation": "depends_on"}'
+
+# Delete project link
+curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_id": "other-project", "relation": "depends_on"}'
+```
+
 > For full schema, column descriptions, and JSON field formats, read `schema.md`.
 
 ## JSON Safety in curl
