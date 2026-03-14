@@ -1,6 +1,6 @@
 ---
 name: kanban-init
-description: Register and initialize the current project in its own kanban DB (~/.claude/kanban-dbs/{project}.db). Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init.
+description: "Register and initialize the current project in its own kanban DB (~/.claude/kanban-dbs/{project}.db). Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init."
 license: MIT
 ---
 
