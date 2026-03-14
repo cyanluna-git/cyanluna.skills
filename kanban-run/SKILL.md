@@ -151,6 +151,11 @@ Template files are at `../kanban/templates/`.
 **Dispatch procedure — execute in this order for every agent:**
 
 ```
+⓪ Fetch project brief (once per pipeline run, cache for all agents)
+   PROJECT_DATA = curl GET /api/projects/$PROJECT
+   PROJECT_BRIEF = extract .brief field (empty string if null or project not found)
+   This is injected into every agent template via <project_brief> placeholder.
+
 ① Read task fields (use per-agent fields to minimize token usage)
    # Planner
    TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description
@@ -176,6 +181,7 @@ Template files are at `../kanban/templates/`.
    Replace every occurrence of:
      <ID>                     → actual task ID
      <PROJECT>                → actual project name
+     <project_brief>          → project brief from step ⓪ (empty string if not set)
      <title>                  → task title
      <description>            → task description (requirements)
      <plan>                   → plan field value
@@ -205,6 +211,7 @@ Template files are at `../kanban/templates/`.
      --provider "$MODEL_PROVIDER" \
      --set ID="$ID" \
      --set PROJECT="$PROJECT" \
+     --set project_brief="$PROJECT_BRIEF" \
      --set title="$TITLE" \
      --set description="$DESCRIPTION" \
      --set plan="$PLAN" \

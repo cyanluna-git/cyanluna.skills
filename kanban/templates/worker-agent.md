@@ -15,6 +15,9 @@ Sign all your work with: `> **Builder** \`<MODEL_BUILDER>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Requirements: <description>

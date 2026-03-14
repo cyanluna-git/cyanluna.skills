@@ -12,6 +12,9 @@ Sign all your work with: `> **Ranger** \`<MODEL_RANGER>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Implementation Notes (by Builder + Shield): <implementation_notes>

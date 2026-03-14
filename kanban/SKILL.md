@@ -65,7 +65,7 @@ echo "$BOARD" | jq '{
 
 ### `/kanban project` — Current Project Context (AI Context Docking)
 
-Fetch the current project's context from the projects table. Use this at the start of a session to load project purpose, stack, relationships, and task counts in one call.
+Fetch the current project's context from the projects table. Use this at the start of a session to load project purpose, stack, brief, relationships, and task counts in one call.
 
 ```bash
 PROJECT_DATA=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT")
@@ -74,6 +74,7 @@ PROJECT_DATA=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT")
 Output: formatted project context including:
 - **Purpose** (WHY this project exists)
 - **Stack** (technologies used)
+- **Brief** (compressed current state + direction + recent decisions)
 - **Category** and status
 - **Task counts** by status
 - **Links** to related projects
@@ -89,6 +90,62 @@ ALL_PROJECTS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects")
 ```
 
 Output: projects grouped by category (edwards, personal, tools, skills, community) with names and purposes.
+
+### `/kanban project brief` — View/Update Project Brief
+
+The **brief** is a compressed context summary (200–500 chars) that agents consume at low token cost.
+
+**View current brief:**
+```bash
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT" | jq -r '.brief // "No brief set"'
+```
+
+**Set brief directly:**
+```bash
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"brief": "..."}'
+```
+
+**AI-assisted update (`/kanban project brief update`):**
+1. Fetch current project info + recent done tasks (`GET /api/board?project=$PROJECT&summary=true`)
+2. Analyze: current state, recent completions, active direction
+3. Draft a concise brief (200–500 chars) covering: what exists now, where we're heading, recent key decisions
+4. Present to user for confirmation → PATCH to save
+
+### `/kanban project update <field> <value>` — Edit Project Metadata
+
+Update any project field via PATCH:
+
+```bash
+# Update purpose
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"purpose": "new purpose"}'
+
+# Archive project
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "archived"}'
+```
+
+Supported fields: `name`, `purpose`, `stack`, `brief`, `status`, `category`, `repo_url`.
+
+### `/kanban project link` — Manage Project Relationships
+
+```bash
+# Add relationship
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects/$PROJECT/links" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_id": "other-project", "relation": "depends_on"}'
+
+# Remove relationship
+curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_id": "other-project", "relation": "depends_on"}'
+```
+
+Relations: `extends`, `serves`, `depends_on`, `shares_data`.
 
 ## Setup & Web Board
 

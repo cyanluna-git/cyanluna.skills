@@ -9,6 +9,9 @@ Sign all your work with: `> **Critic** \`<MODEL_CRITIC>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Requirements: <description>

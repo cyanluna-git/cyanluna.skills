@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS projects (
   name TEXT NOT NULL,
   purpose TEXT,
   stack TEXT,
+  brief TEXT,
   status TEXT DEFAULT 'active',
   category TEXT,
   repo_url TEXT,
@@ -185,6 +186,7 @@ CREATE TABLE IF NOT EXISTS projects (
 | `name` | TEXT | Display name (often same as id) |
 | `purpose` | TEXT | WHY this project exists — used for AI context docking |
 | `stack` | TEXT | Technologies / frameworks used |
+| `brief` | TEXT | Compressed project context: current state + direction + recent decisions. Injected into agent prompts for low-token-cost project awareness |
 | `status` | TEXT | `active` / `archived` / `paused` |
 | `category` | TEXT | Grouping: `edwards`, `personal`, `tools`, `skills`, `community` |
 | `repo_url` | TEXT | Git remote URL |

@@ -363,6 +363,7 @@ async function initializeSchema(sql) {
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS decision_log TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS brief TEXT`,
   ];
   for (const statement of migrations) {
     await sql.query(statement);
@@ -396,6 +397,7 @@ async function initializeSchema(sql) {
       name TEXT NOT NULL,
       purpose TEXT,
       stack TEXT,
+      brief TEXT,
       status TEXT DEFAULT 'active',
       category TEXT,
       repo_url TEXT,
@@ -1173,18 +1175,19 @@ export default async function handler(req, res) {
         return;
       }
       const [row] = await q(sql, `
-        INSERT INTO projects (id, name, purpose, stack, status, category, repo_url)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO projects (id, name, purpose, stack, brief, status, category, repo_url)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           purpose = COALESCE(EXCLUDED.purpose, projects.purpose),
           stack = COALESCE(EXCLUDED.stack, projects.stack),
+          brief = COALESCE(EXCLUDED.brief, projects.brief),
           status = COALESCE(EXCLUDED.status, projects.status),
           category = COALESCE(EXCLUDED.category, projects.category),
           repo_url = COALESCE(EXCLUDED.repo_url, projects.repo_url),
           updated_at = NOW()
         RETURNING *
-      `, [body.id, body.name, body.purpose || null, body.stack || null, body.status || 'active', body.category || null, body.repo_url || null]);
+      `, [body.id, body.name, body.purpose || null, body.stack || null, body.brief || null, body.status || 'active', body.category || null, body.repo_url || null]);
       json(res, 200, { success: true, project: row });
       return;
     }
@@ -1225,6 +1228,7 @@ export default async function handler(req, res) {
         assign("name", body.name);
         assign("purpose", body.purpose);
         assign("stack", body.stack);
+        assign("brief", body.brief);
         assign("status", body.status);
         assign("category", body.category);
         assign("repo_url", body.repo_url);

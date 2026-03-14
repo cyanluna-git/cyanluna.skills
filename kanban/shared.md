@@ -172,10 +172,10 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
   -H 'Content-Type: application/json' \
   -d '{"id": "my-project", "name": "My Project", "purpose": "...", "stack": "...", "category": "personal"}'
 
-# Update project fields
+# Update project fields (purpose, stack, brief, status, category, repo_url)
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"purpose": "updated purpose"}'
+  -d '{"brief": "Current state + direction + recent decisions"}'
 
 # Delete project
 curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT"

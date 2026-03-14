@@ -13,6 +13,9 @@ Sign all your work with: `> **Planner** \`<MODEL_PLANNER>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Requirements: <description>

@@ -9,6 +9,9 @@ Sign all your work with: `> **Inspector** \`<MODEL_INSPECTOR>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Requirements: <description>

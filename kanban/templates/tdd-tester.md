@@ -12,6 +12,9 @@ Sign all your work with: `> **Shield** \`<MODEL_SHIELD>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Requirements: <description>
