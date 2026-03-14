@@ -163,6 +163,49 @@ subprocess.run(['curl','-s',*auth_header,'-X','PATCH',f'{base_url}/api/task/{tas
 
 Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
 
+## Table: projects
+
+```sql
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  purpose TEXT,
+  stack TEXT,
+  status TEXT DEFAULT 'active',
+  category TEXT,
+  repo_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT | Project identifier (matches kanban.json `project` field) |
+| `name` | TEXT | Display name (often same as id) |
+| `purpose` | TEXT | WHY this project exists — used for AI context docking |
+| `stack` | TEXT | Technologies / frameworks used |
+| `status` | TEXT | `active` / `archived` / `paused` |
+| `category` | TEXT | Grouping: `edwards`, `personal`, `tools`, `skills`, `community` |
+| `repo_url` | TEXT | Git remote URL |
+
+## Table: project_links
+
+```sql
+CREATE TABLE IF NOT EXISTS project_links (
+  source_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  target_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  relation TEXT NOT NULL,
+  PRIMARY KEY (source_id, target_id, relation)
+);
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_id` | TEXT | Source project ID (FK to projects) |
+| `target_id` | TEXT | Target project ID (FK to projects) |
+| `relation` | TEXT | Relationship type: `extends`, `serves`, `depends_on`, `shares_data` |
+
 ## Schema Migrations
 
 New columns are added with `ADD COLUMN IF NOT EXISTS` in PostgreSQL — idempotent, no try/catch needed.

@@ -304,6 +304,30 @@ async function initializeSchema(sql: Sql): Promise<void> {
   await sql.query(`UPDATE tasks SET priority = 'low'       WHERE priority = '낮음'`);
   await sql.query(`UPDATE tasks SET status = 'impl'        WHERE status = 'inprogress'`);
   await sql.query(`UPDATE tasks SET status = 'impl_review' WHERE status = 'review'`);
+
+  // ── projects + project_links tables ──
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      purpose TEXT,
+      stack TEXT,
+      status TEXT DEFAULT 'active',
+      category TEXT,
+      repo_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS project_links (
+      source_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      target_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      relation TEXT NOT NULL,
+      PRIMARY KEY (source_id, target_id, relation)
+    )
+  `);
 }
 
 function ensureSchema(sql: Sql): Promise<void> {
@@ -991,6 +1015,172 @@ export function kanbanApiPlugin(): Plugin {
           res.setHeader("Location", `${r2PublicUrl()}/${safeName}`);
           res.end();
           return;
+        }
+
+        // ── Projects API ──────────────────────────────────────────────────────
+
+        // GET /api/projects — List all with links
+        if (pathname === "/api/projects" && req.method === "GET") {
+          const rows = await q(sql, `
+            SELECT p.*,
+              COALESCE(json_agg(json_build_object(
+                'source_id', pl.source_id, 'target_id', pl.target_id, 'relation', pl.relation
+              )) FILTER (WHERE pl.source_id IS NOT NULL), '[]') AS links
+            FROM projects p
+            LEFT JOIN project_links pl ON p.id = pl.source_id OR p.id = pl.target_id
+            GROUP BY p.id
+            ORDER BY p.category, p.name
+          `);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ projects: rows }));
+          return;
+        }
+
+        // POST /api/projects — Create/Upsert
+        if (pathname === "/api/projects" && req.method === "POST") {
+          const body = await parseBody(req);
+          if (!body.id || !body.name) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "id and name are required" }));
+            return;
+          }
+          const [row] = await q(sql, `
+            INSERT INTO projects (id, name, purpose, stack, status, category, repo_url)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (id) DO UPDATE SET
+              name = EXCLUDED.name,
+              purpose = COALESCE(EXCLUDED.purpose, projects.purpose),
+              stack = COALESCE(EXCLUDED.stack, projects.stack),
+              status = COALESCE(EXCLUDED.status, projects.status),
+              category = COALESCE(EXCLUDED.category, projects.category),
+              repo_url = COALESCE(EXCLUDED.repo_url, projects.repo_url),
+              updated_at = NOW()
+            RETURNING *
+          `, [body.id, body.name, body.purpose || null, body.stack || null, body.status || 'active', body.category || null, body.repo_url || null]);
+          res.setHeader("Content-Type", "application/json");
+          broadcast();
+          res.end(JSON.stringify({ success: true, project: row }));
+          return;
+        }
+
+        // /api/projects/:id routes
+        const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+        if (projectMatch) {
+          const projectId = decodeURIComponent(projectMatch[1]);
+
+          // GET /api/projects/:id — Single project with task stats
+          if (req.method === "GET") {
+            const [project] = await q(sql, "SELECT * FROM projects WHERE id = $1", [projectId]);
+            if (!project) {
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Project not found" }));
+              return;
+            }
+            const taskCounts = await q<{ status: string; count: number }>(sql, "SELECT status, COUNT(*)::int AS count FROM tasks WHERE project = $1 GROUP BY status", [projectId]);
+            const links = await q(sql, "SELECT * FROM project_links WHERE source_id = $1 OR target_id = $1", [projectId]);
+            const counts: Record<string, number> = {};
+            for (const row of taskCounts) {
+              counts[row.status] = row.count;
+            }
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ...project, task_counts: counts, links }));
+            return;
+          }
+
+          // PATCH /api/projects/:id — Update
+          if (req.method === "PATCH") {
+            const body = await parseBody(req);
+            const sets: string[] = [];
+            const values: any[] = [];
+            let position = 1;
+            const assign = (field: string, value: any) => {
+              if (value === undefined) return;
+              sets.push(`${field} = $${position++}`);
+              values.push(value);
+            };
+            assign("name", body.name);
+            assign("purpose", body.purpose);
+            assign("stack", body.stack);
+            assign("status", body.status);
+            assign("category", body.category);
+            assign("repo_url", body.repo_url);
+            if (sets.length === 0) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "No fields to update" }));
+              return;
+            }
+            sets.push("updated_at = NOW()");
+            values.push(projectId);
+            await sql.query(`UPDATE projects SET ${sets.join(", ")} WHERE id = $${position}`, values);
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+
+          // DELETE /api/projects/:id
+          if (req.method === "DELETE") {
+            await sql.query("DELETE FROM projects WHERE id = $1", [projectId]);
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+        }
+
+        // /api/projects/:id/links routes
+        const projectLinksMatch = pathname.match(/^\/api\/projects\/([^/]+)\/links$/);
+        if (projectLinksMatch) {
+          const projectId = decodeURIComponent(projectLinksMatch[1]);
+
+          // GET /api/projects/:id/links
+          if (req.method === "GET") {
+            const links = await q(sql, "SELECT * FROM project_links WHERE source_id = $1 OR target_id = $1", [projectId]);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ links }));
+            return;
+          }
+
+          // POST /api/projects/:id/links
+          if (req.method === "POST") {
+            const body = await parseBody(req);
+            if (!body.target_id || !body.relation) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "target_id and relation are required" }));
+              return;
+            }
+            await sql.query(
+              "INSERT INTO project_links (source_id, target_id, relation) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+              [projectId, body.target_id, body.relation]
+            );
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+
+          // DELETE /api/projects/:id/links
+          if (req.method === "DELETE") {
+            const body = await parseBody(req);
+            if (!body.target_id || !body.relation) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "target_id and relation are required" }));
+              return;
+            }
+            await sql.query(
+              "DELETE FROM project_links WHERE source_id = $1 AND target_id = $2 AND relation = $3",
+              [projectId, body.target_id, body.relation]
+            );
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
         }
 
         // ── Bitbucket PR Webhook ──────────────────────────────

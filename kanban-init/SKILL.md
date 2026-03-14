@@ -81,6 +81,60 @@ fi
 
 If `~/.claude/kanban-auth` already exists, show its current `KANBAN_BASE_URL` and confirm it matches. Do NOT overwrite without asking.
 
+### 2c. Auto-register project in projects table
+
+After writing the config, upsert the current project to the projects table via POST /api/projects.
+Infer project metadata from the local environment:
+
+```bash
+# Infer category from path
+PARENT_DIR=$(basename "$(dirname "$(pwd)")")
+if [ "$PARENT_DIR" = "edwards" ]; then
+  CATEGORY="edwards"
+elif echo "$PROJECT" | grep -qE 'skills|kanban'; then
+  CATEGORY="skills"
+elif echo "$PROJECT" | grep -qE 'tools|assist|gmail|jira'; then
+  CATEGORY="tools"
+elif [ "$PROJECT" = "community.skills" ]; then
+  CATEGORY="community"
+else
+  CATEGORY="personal"
+fi
+
+# Infer purpose from CLAUDE.md (first non-heading, non-empty line)
+PURPOSE=""
+if [ -f "CLAUDE.md" ]; then
+  PURPOSE=$(grep -v '^#' CLAUDE.md | grep -v '^---' | grep -v '^\s*$' | head -1 | cut -c1-300)
+fi
+
+# Infer stack from CLAUDE.md
+STACK=""
+if [ -f "CLAUDE.md" ]; then
+  STACK=$(grep -iE 'stack|tech|typescript|javascript|python|react|vue|next|node|vite' CLAUDE.md | head -1 | cut -c1-200)
+fi
+
+# Infer repo_url from git remote
+REPO_URL=$(git remote get-url origin 2>/dev/null || echo "")
+
+# Upsert project
+PROJ_PAYLOAD=$(python3 -c "
+import json
+print(json.dumps({
+  'id': '$PROJECT',
+  'name': '$PROJECT',
+  'purpose': '''$PURPOSE''' if '''$PURPOSE''' else None,
+  'stack': '''$STACK''' if '''$STACK''' else None,
+  'category': '$CATEGORY',
+  'repo_url': '$REPO_URL' if '$REPO_URL' else None,
+}))
+")
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
+  -H 'Content-Type: application/json' \
+  -d "$PROJ_PAYLOAD" > /dev/null 2>&1 || true
+```
+
+This is best-effort — if the API call fails (e.g., server not running), init still succeeds.
+
 ### 3. Create `kanban-board/start.sh`
 
 ```bash
