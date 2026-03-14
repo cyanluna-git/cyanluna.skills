@@ -158,7 +158,7 @@ function sortBoardGroup<T extends { completed_at?: string | null; rank?: number;
     });
   }
   return sorted.sort((a, b) =>
-    Number(a.rank || 0) - Number(b.rank || 0) || Number(a.id || 0) - Number(b.id || 0)
+    Number(b.rank || 0) - Number(a.rank || 0) || Number(b.id || 0) - Number(a.id || 0)
   );
 }
 
@@ -512,10 +512,10 @@ export function kanbanApiPlugin(): Plugin {
           if (projectParam) {
             const safe = sanitizeProject(projectParam);
             tasks = await q<Task>(sql,
-              `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank, id`, [safe]
+              `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank DESC, id DESC`, [safe]
             );
           } else {
-            tasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank, id`);
+            tasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank DESC, id DESC`);
           }
 
           const boardTasks = summary ? tasks.map(summarizeBoardTask) : tasks;
@@ -749,18 +749,17 @@ export function kanbanApiPlugin(): Plugin {
               }
             } else { newRank = 1000; }
           } else if (afterId) {
+            // afterId = visually above = higher rank in DESC order
+            // Drop at bottom: need rank LOWER than afterId
             const [above] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [afterId]);
-            newRank = above ? above.rank + 1000 : 1000;
-          } else if (beforeId) {
-            const [below] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
-            if (below) {
-              newRank = Math.floor(below.rank / 2);
-              if (newRank === 0) {
-                await renumberRanks(sql, task.project, targetStatus);
-                const [b2] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
-                newRank = Math.floor(b2.rank / 2);
-              }
+            if (above) {
+              newRank = above.rank - 1000;
             } else { newRank = 1000; }
+          } else if (beforeId) {
+            // beforeId = visually below = lower rank in DESC order
+            // Drop at top: need rank HIGHER than beforeId
+            const [below] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
+            newRank = below ? below.rank + 1000 : 1000;
           } else { newRank = 1000; }
 
           await sql.query("UPDATE tasks SET rank = $1, updated_at = NOW() WHERE id = $2", [newRank, id]);
@@ -791,7 +790,7 @@ export function kanbanApiPlugin(): Plugin {
           const [maxRow] = await q<{ maxrank: number | null }>(sql,
             "SELECT MAX(rank) AS maxrank FROM tasks WHERE project = $1 AND status = 'todo'", [safe]
           );
-          const rank = (maxRow?.maxrank ?? 0) + 1000;
+          const rank = (maxRow?.maxrank ?? 0) + 1;
 
           const [row] = await q<{ id: number }>(sql,
             `INSERT INTO tasks (project, title, priority, description, tags, rank, level)
