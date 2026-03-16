@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { neon } from "@neondatabase/serverless";
+import pg from "pg";
 import { createHash, timingSafeEqual } from "crypto";
 import path from "path";
 
@@ -180,12 +180,13 @@ function getSql() {
   if (!connectionString) {
     throw new Error("DATABASE_URL or NEON_DATABASE_URL is required");
   }
-  sqlClient = neon(connectionString);
+  sqlClient = new pg.Pool({ connectionString, max: 3, idleTimeoutMillis: 10000 });
   return sqlClient;
 }
 
 async function q(sql, text, params = []) {
-  return (await sql.query(text, params));
+  const result = await sql.query(text, params);
+  return result.rows;
 }
 
 function parseJsonArray(raw) {
