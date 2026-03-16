@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { neon } from "@neondatabase/serverless";
+import pg from "pg";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -35,12 +35,13 @@ async function deleteFromR2(key: string): Promise<void> {
   try { await getR2().send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key })); } catch { /* ok */ }
 }
 
-type Sql = ReturnType<typeof neon>;
+type Sql = pg.Pool;
 const BOARD_STATUSES = ["todo", "plan", "plan_review", "impl", "impl_review", "test", "done"] as const;
 
 // Typed query helper: returns T[]
 async function q<T>(sql: Sql, text: string, params?: any[]): Promise<T[]> {
-  return (await sql.query(text, params)) as unknown as T[];
+  const r = await sql.query(text, params);
+  return r.rows as T[];
 }
 
 function parseJsonArray(raw: string | null): any[] {
@@ -222,7 +223,7 @@ function getSql(): Sql {
       "Create kanban-board/.env with: DATABASE_URL=postgresql://..."
     );
   }
-  _sql = neon(connectionString);
+  _sql = new pg.Pool({ connectionString });
   return _sql;
 }
 

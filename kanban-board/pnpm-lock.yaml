@@ -18,6 +18,9 @@ importers:
         specifier: ^8.16.0
         version: 8.20.0
     devDependencies:
+      '@types/pg':
+        specifier: ^8.18.0
+        version: 8.18.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -688,6 +691,9 @@ packages:
 
   '@types/node@25.3.0':
     resolution: {integrity: sha512-4K3bqJpXpqfg2XKGK9bpDTc6xO/xoUP/RBWS7AtRMug6zZFaRekiLzjVtAoZMquxoAbzBvy5nxQ7veS5eYzf8A==}
+
+  '@types/pg@8.18.0':
+    resolution: {integrity: sha512-gT+oueVQkqnj6ajGJXblFR4iavIXWsGAFCk3dP4Kki5+a9R4NMt0JARdk6s8cUKcfUoqP5dAtDSLU8xYUTFV+Q==}
 
   bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
@@ -1800,7 +1806,12 @@ snapshots:
   '@types/node@25.3.0':
     dependencies:
       undici-types: 7.18.2
-    optional: true
+
+  '@types/pg@8.18.0':
+    dependencies:
+      '@types/node': 25.3.0
+      pg-protocol: 1.13.0
+      pg-types: 2.2.0
 
   bowser@2.14.1: {}
 
@@ -1949,8 +1960,7 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  undici-types@7.18.2:
-    optional: true
+  undici-types@7.18.2: {}
 
   vite@6.4.1(@types/node@25.3.0):
     dependencies:
