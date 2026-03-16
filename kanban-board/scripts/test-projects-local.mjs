@@ -231,7 +231,7 @@ async function testGetProjectByIdNotFound() {
 async function testPatchProject() {
   console.log("\n[9] PATCH /api/projects/:id — update fields");
   const { status, data } = await call("PATCH", `/api/projects/${encodeURIComponent(TEST_ID_A)}`, {
-    stack: "Node.js, PostgreSQL, Neon",
+    stack: "Node.js, PostgreSQL",
     status: "inactive",
   });
   assertEqual(status, 200, "status code");
@@ -239,7 +239,7 @@ async function testPatchProject() {
 
   // Verify persistence
   const { data: proj } = await call("GET", `/api/projects/${encodeURIComponent(TEST_ID_A)}`, null);
-  assertEqual(proj.stack, "Node.js, PostgreSQL, Neon", "stack updated");
+  assertEqual(proj.stack, "Node.js, PostgreSQL", "stack updated");
   assertEqual(proj.status, "inactive", "status updated");
 }
 
@@ -599,7 +599,7 @@ async function main() {
   // Cleanup stale test data first
   await cleanup();
 
-  // Network tests (real Neon DB via handler)
+  // Network tests (real PostgreSQL DB via handler)
   await testListProjects();
   await testCreateProject();
   await testCreateProjectB();

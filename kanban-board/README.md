@@ -43,7 +43,7 @@ Use these values when creating a fresh Vercel project for the board API and fron
 
 | Name | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | yes | Neon PostgreSQL connection used by the board API |
+| `DATABASE_URL` | yes | PostgreSQL connection used by the board API |
 | `KANBAN_AUTH_TOKEN_SHA256` | yes | SHA-256 of the shared raw token |
 | `KANBAN_PROJECT_NAME` | yes | Default project name shown by the board shell |
 | `KANBAN_ALLOW_INSECURE_LOCAL_DEV` | no | Localhost-only auth bypass during local dev |
@@ -67,7 +67,7 @@ vercel env add KANBAN_AUTH_TOKEN_SHA256 production
 vercel env add KANBAN_PROJECT_NAME production
 ```
 
-Use the Neon connection string for `DATABASE_URL`. Generate the shared token locally, save only its SHA-256 hash in Vercel, and keep the raw token in your local config.
+Use the PostgreSQL connection string for `DATABASE_URL`. Generate the shared token locally, save only its SHA-256 hash in Vercel, and keep the raw token in your local config.
 
 ### 3. Build and deploy
 

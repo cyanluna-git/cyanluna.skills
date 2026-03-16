@@ -1,6 +1,6 @@
 # Kanban Shared Context
 
-Manages project tasks in **Neon PostgreSQL** via the kanban-board HTTP API.
+Manages project tasks in **PostgreSQL** via the kanban-board HTTP API.
 All projects share a single centralized DB — the kanban-board server must be running for all operations.
 
 ## DB Path & Project Config
@@ -218,7 +218,7 @@ Or use Python `json.dumps()` to serialize the body safely.
 ## Error Handling
 
 > **CRITICAL: If the API call fails, NEVER fall back to SQLite or any direct DB access.**
-> The kanban DB is Neon PostgreSQL — there is no local SQLite file. Fix the API call and retry.
+> The kanban DB is PostgreSQL — there is no local SQLite file. Fix the API call and retry.
 
 - **Server not running**: Run `./kanban-board/start.sh` first and retry when using localhost
 - **API error**: Debug the request (check JSON validity, `PROJECT`, `BASE_URL`, and whether `AUTH_TOKEN` is configured) — do NOT bypass the API

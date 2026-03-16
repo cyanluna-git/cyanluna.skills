@@ -196,7 +196,7 @@ async function testGetProjectByIdNotFound() {
 async function testPatchProject() {
   console.log("\n[9] PATCH /api/projects/:id — update fields");
   const { status, data } = await api("PATCH", `/api/projects/${encodeURIComponent(TEST_ID_A)}`, {
-    stack: "Node.js, PostgreSQL, Neon",
+    stack: "Node.js, PostgreSQL",
     status: "inactive",
   });
   assertEqual(status, 200, "status code");
@@ -204,7 +204,7 @@ async function testPatchProject() {
 
   // Verify changes were persisted
   const { data: proj } = await api("GET", `/api/projects/${encodeURIComponent(TEST_ID_A)}`);
-  assertEqual(proj.stack, "Node.js, PostgreSQL, Neon", "stack updated");
+  assertEqual(proj.stack, "Node.js, PostgreSQL", "stack updated");
   assertEqual(proj.status, "inactive", "status updated");
 }
 

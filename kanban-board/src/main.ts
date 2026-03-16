@@ -1619,7 +1619,7 @@ async function showTaskDetail(id: number, project?: string) {
   }
 }
 
-// Neon/PostgreSQL returns timestamps as "YYYY-MM-DD HH:mm:ss.ffffff" (space, no T, no Z).
+// PostgreSQL returns timestamps as "YYYY-MM-DD HH:mm:ss.ffffff" (space, no T, no Z).
 // new Date() requires ISO 8601 T-separator; we normalize here.
 function parseTs(dateStr: string): Date {
   if (!dateStr) return new Date(NaN);
