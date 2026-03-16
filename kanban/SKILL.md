@@ -1,6 +1,6 @@
 ---
 name: kanban
-description: Manage project tasks in Neon PostgreSQL via kanban-board HTTP API. Supports task CRUD (add, edit, move, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /kanban-run, for requirements refinement use /kanban-refine. Run /kanban-init first to register the project.
+description: Manage project tasks in PostgreSQL via kanban-board HTTP API. Supports task CRUD (add, edit, move, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /kanban-run, for requirements refinement use /kanban-refine. Run /kanban-init first to register the project.
 license: MIT
 ---
 

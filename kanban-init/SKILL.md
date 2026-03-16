@@ -1,11 +1,11 @@
 ---
 name: kanban-init
-description: "Register and initialize the current project in Neon PostgreSQL kanban. Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init."
+description: "Register and initialize the current project in PostgreSQL kanban. Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init."
 license: MIT
 ---
 
-Registers the current project in **Neon PostgreSQL** (shared central DB) and creates a local config so `/kanban` knows which project to use.
-No per-project DB file is created — Neon handles storage for all projects automatically.
+Registers the current project in **PostgreSQL** (shared central DB) and creates a local config so `/kanban` knows which project to use.
+No per-project DB file is created — the central PostgreSQL server handles storage for all projects automatically.
 
 ## Usage
 
@@ -167,7 +167,7 @@ Output:
 ✅ Project '<PROJECT_NAME>' registered in kanban.
 
   Config:  .codex/kanban.json, .claude/kanban.json
-  DB:      Neon PostgreSQL (shared central DB)
+  DB:      PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
   Auth:    ~/.claude/kanban-auth (global, shared across all projects)
   Start:   ./kanban-board/start.sh

@@ -1,4 +1,4 @@
-import { neon } from "@neondatabase/serverless";
+import pg from "pg";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -9,10 +9,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const IMAGES_DIR = path.resolve(__dirname, "..", "..", ".claude", "kanban-images");
 if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 
-type Sql = ReturnType<typeof neon>;
+type Sql = pg.Pool;
 
 async function q<T>(sql: Sql, text: string, params?: any[]): Promise<T[]> {
-  return (await sql.query(text, params)) as unknown as T[];
+  const result = await sql.query(text, params);
+  return result.rows as T[];
 }
 
 function getTransitions(level: number): Record<string, string[]> {
@@ -53,14 +54,14 @@ let _schemaReady: Promise<void> | null = null;
 
 function getSql(): Sql {
   if (_sql) return _sql;
-  const connectionString = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
+  const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error(
-      "DATABASE_URL or NEON_DATABASE_URL env var is required.\n" +
+      "DATABASE_URL env var is required.\n" +
       "Create .env in the project root with: DATABASE_URL=postgresql://..."
     );
   }
-  _sql = neon(connectionString);
+  _sql = new pg.Pool({ connectionString });
   return _sql;
 }
 
