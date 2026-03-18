@@ -112,8 +112,8 @@ function registerServiceWorker() {
   });
 }
 
-function isView(value: string | null): value is "board" | "list" | "chronicle" {
-  return value === "board" || value === "list" || value === "chronicle";
+function isView(value: string | null): value is "board" | "list" | "chronicle" | "graph" {
+  return value === "board" || value === "list" || value === "chronicle" || value === "graph";
 }
 
 function isColumnKey(value: string): value is typeof COLUMNS[number]["key"] {
@@ -135,8 +135,8 @@ function readStoredMobileBoardColumns(): Set<string> {
 let currentProject: string | null = localStorage.getItem('kanban-project');
 let isDragging = false;
 let isMobileViewport = MOBILE_MEDIA_QUERY.matches;
-let currentView: "board" | "list" | "chronicle" = isView(localStorage.getItem(VIEW_STORAGE_KEY))
-  ? (localStorage.getItem(VIEW_STORAGE_KEY) as "board" | "list" | "chronicle")
+let currentView: "board" | "list" | "chronicle" | "graph" = isView(localStorage.getItem(VIEW_STORAGE_KEY))
+  ? (localStorage.getItem(VIEW_STORAGE_KEY) as "board" | "list" | "chronicle" | "graph")
   : (isMobileViewport ? "list" : "board");
 let currentSearch: string = '';
 let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
@@ -1852,6 +1852,23 @@ async function loadChronicleView() {
   }
 }
 
+async function loadGraphView() {
+  const el = document.getElementById("graph-view")!;
+  el.innerHTML = `
+    <div class="graph-placeholder">
+      <div class="graph-spinner"></div>
+      <p>Loading graph&hellip;</p>
+    </div>`;
+
+  // Phase 2 will replace this placeholder with a force-directed graph
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
+  el.innerHTML = `
+    <div class="graph-placeholder">
+      <p style="color:#64748b;font-size:0.9rem">Graph view — coming soon</p>
+    </div>`;
+}
+
 async function loadBoard() {
   const board = document.getElementById("board")!;
   try {
@@ -2279,20 +2296,23 @@ async function loadProjectInfo() {
   }
 }
 
-function switchView(view: "board" | "list" | "chronicle") {
+function switchView(view: "board" | "list" | "chronicle" | "graph") {
   currentView = view;
   localStorage.setItem(VIEW_STORAGE_KEY, currentView);
   const boardEl = document.getElementById("board")!;
   const listEl = document.getElementById("list-view")!;
   const chronicleEl = document.getElementById("chronicle-view")!;
+  const graphEl = document.getElementById("graph-view")!;
 
   // Hide all
   boardEl.classList.add("hidden");
   listEl.classList.add("hidden");
   chronicleEl.classList.add("hidden");
+  graphEl.classList.add("hidden");
   document.getElementById("tab-board")!.classList.remove("active");
   document.getElementById("tab-list")!.classList.remove("active");
   document.getElementById("tab-chronicle")!.classList.remove("active");
+  document.getElementById("tab-graph")!.classList.remove("active");
 
   if (view === "board") {
     boardEl.classList.remove("hidden");
@@ -2302,17 +2322,22 @@ function switchView(view: "board" | "list" | "chronicle") {
     listEl.classList.remove("hidden");
     document.getElementById("tab-list")!.classList.add("active");
     loadListView();
-  } else {
+  } else if (view === "chronicle") {
     chronicleEl.classList.remove("hidden");
     document.getElementById("tab-chronicle")!.classList.add("active");
     loadChronicleView();
+  } else {
+    graphEl.classList.remove("hidden");
+    document.getElementById("tab-graph")!.classList.add("active");
+    loadGraphView();
   }
 }
 
 function refreshCurrentView() {
   if (currentView === "board") loadBoard();
   else if (currentView === "list") loadListView();
-  else loadChronicleView();
+  else if (currentView === "chronicle") loadChronicleView();
+  else loadGraphView();
 }
 
 // Restore persisted UI state
@@ -2371,6 +2396,7 @@ document.getElementById("auth-form")!.addEventListener("submit", async (e) => {
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
 document.getElementById("tab-chronicle")!.addEventListener("click", () => switchView("chronicle"));
+document.getElementById("tab-graph")!.addEventListener("click", () => switchView("graph"));
 
 document.getElementById("toolbar-mobile-toggle")!.addEventListener("click", () => {
   mobileFiltersOpen = !mobileFiltersOpen;
