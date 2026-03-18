@@ -2146,26 +2146,29 @@ async function loadGraphView() {
         ctx.lineWidth = 1.5 / globalScale;
         ctx.stroke();
 
-        // Topic label — above node
-        if (topic) {
-          const topicFontSize = Math.max(3, 9 / globalScale);
+        // Topic label — centered below node, always visible
+        const labelText = topic ?? node.tags[0] ?? "";
+        if (labelText) {
+          const topicFontSize = Math.max(2, 10 / globalScale);
           ctx.font = `600 ${topicFontSize}px sans-serif`;
           ctx.fillStyle = alpha < 0.5
             ? "rgba(148,163,184,0.15)"
-            : (TOPIC_COLORS[topic] ?? "#94a3b8");
+            : (topic ? (TOPIC_COLORS[topic] ?? "#94a3b8") : "#94a3b8");
           ctx.textAlign = "center";
-          ctx.textBaseline = "bottom";
-          ctx.fillText(topic, x, y - r - 2 / globalScale);
+          ctx.textBaseline = "top";
+          ctx.fillText(labelText, x, y + r + 2 / globalScale);
         }
 
-        // Title label — right of node
-        const label = node.title.replace(/^#\d+\s*/, "").slice(0, 36);
-        const fontSize = Math.max(3, 11 / globalScale);
-        ctx.font = `${fontSize}px sans-serif`;
-        ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.2)" : "#94a3b8";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(label, x + r + 4 / globalScale, y);
+        // Title — only when zoomed in (Obsidian style: detail on demand)
+        if (globalScale > 2.5) {
+          const titleText = node.title.replace(/^#\d+\s*/, "").slice(0, 30);
+          const titleFontSize = 9 / globalScale;
+          ctx.font = `${titleFontSize}px sans-serif`;
+          ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.2)" : "#64748b";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(titleText, x, y - r - 2 / globalScale);
+        }
 
         // Reset alpha
         ctx.globalAlpha = 1;
