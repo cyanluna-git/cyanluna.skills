@@ -2283,7 +2283,6 @@ pre.mermaid svg {
 /* ── Graph View ──────────────────────────────────────────────── */
 #graph-view {
   position: relative;
-  height: calc(100vh - 112px);
   overflow: hidden;
   padding: 0;
 }

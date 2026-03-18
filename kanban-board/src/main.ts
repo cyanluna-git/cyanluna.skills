@@ -1857,6 +1857,10 @@ async function loadChronicleView() {
 
 async function loadGraphView() {
   const el = document.getElementById("graph-view")!;
+  // Set exact height from current viewport position
+  const top = el.getBoundingClientRect().top;
+  el.style.height = `${window.innerHeight - top}px`;
+
   el.innerHTML = `
     <div class="graph-placeholder">
       <div class="graph-spinner"></div>
@@ -1976,7 +1980,7 @@ async function loadGraphView() {
     // Fallback: first tag that has a color mapping
     return lower.find((t) => t in TOPIC_COLORS) ?? null;
   }
-  const LEVEL_SIZES: Record<number, number> = { 1: 4, 2: 7, 3: 10 };
+  const LEVEL_SIZES: Record<number, number> = { 1: 9, 2: 16, 3: 25 };
   const STATUS_RING: Record<string, string> = {
     todo:        "#475569",
     plan:        "#3b82f6",
@@ -2142,14 +2146,26 @@ async function loadGraphView() {
         ctx.lineWidth = 1.5 / globalScale;
         ctx.stroke();
 
-        // Node label — Obsidian style
-        const label = node.title.replace(/^#\d+\s*/, "").slice(0, 40);
+        // Topic label — above node
+        if (topic) {
+          const topicFontSize = Math.max(3, 9 / globalScale);
+          ctx.font = `600 ${topicFontSize}px sans-serif`;
+          ctx.fillStyle = alpha < 0.5
+            ? "rgba(148,163,184,0.15)"
+            : (TOPIC_COLORS[topic] ?? "#94a3b8");
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(topic, x, y - r - 2 / globalScale);
+        }
+
+        // Title label — right of node
+        const label = node.title.replace(/^#\d+\s*/, "").slice(0, 36);
         const fontSize = Math.max(3, 11 / globalScale);
         ctx.font = `${fontSize}px sans-serif`;
-        ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.2)" : "#cbd5e1";
+        ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.2)" : "#94a3b8";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, x + r + 3 / globalScale, y);
+        ctx.fillText(label, x + r + 4 / globalScale, y);
 
         // Reset alpha
         ctx.globalAlpha = 1;
@@ -2195,7 +2211,7 @@ async function loadGraphView() {
       .warmupTicks(100)
       .cooldownTime(5000)
       .width(el.offsetWidth || window.innerWidth)
-      .height(el.offsetHeight || window.innerHeight - 112)
+      .height(window.innerHeight - el.getBoundingClientRect().top)
       .graphData({ nodes, links });
 
     graphInstance = graph as unknown as GraphInstanceAPI;
@@ -2215,15 +2231,15 @@ async function loadGraphView() {
     }
 
     // ResizeObserver for responsive canvas sizing
-    graphResizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          graph.width(width).height(height);
-        }
+    graphResizeObserver = new ResizeObserver(() => {
+      const w = el.offsetWidth;
+      const h = window.innerHeight - el.getBoundingClientRect().top;
+      if (w > 0 && h > 0) {
+        el.style.height = `${h}px`;
+        graph.width(w).height(h);
       }
     });
-    graphResizeObserver.observe(el);
+    graphResizeObserver.observe(document.documentElement);
 
   } catch (err) {
     console.error("loadGraphView failed:", err);
