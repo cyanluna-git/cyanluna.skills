@@ -439,18 +439,18 @@ async function renumberRanks(sql, project, status) {
 }
 
 function r2Bucket() {
-  return process.env.CLOUDFLARE_R2_BUCKET_NAME || "cyanluna-kanban-images";
+  return (process.env.CLOUDFLARE_R2_BUCKET_NAME || "cyanluna-kanban-images").trim();
 }
 
 function r2PublicUrl() {
-  return String(process.env.CLOUDFLARE_R2_PUBLIC_URL || "").replace(/\/$/, "");
+  return String(process.env.CLOUDFLARE_R2_PUBLIC_URL || "").trim().replace(/\/$/, "");
 }
 
 function getR2() {
   if (r2Client) return r2Client;
-  const endpoint = process.env.CLOUDFLARE_R2_ENDPOINT;
-  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
+  const endpoint = process.env.CLOUDFLARE_R2_ENDPOINT?.trim();
+  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY?.trim();
   if (!endpoint || !accessKeyId || !secretAccessKey) {
     throw new Error("Cloudflare R2 env vars missing");
   }
