@@ -2353,6 +2353,35 @@ pre.mermaid svg {
   font-size: 0.68rem;
 }
 
+.graph-legend {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+  pointer-events: none;
+}
+.graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  text-transform: capitalize;
+}
+.graph-legend-item span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 @media (max-width: 600px) {
   #tab-graph {
     display: none;

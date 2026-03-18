@@ -154,6 +154,8 @@ const summaryBoardCache = new Map<string, Board>();
 const summaryBoardEtagCache = new Map<string, string>();
 const summaryRevalidation = new Map<string, Promise<void>>();
 let graphResizeObserver: ResizeObserver | null = null;
+interface GraphInstanceAPI { pauseAnimation: () => void; }
+let graphInstance: GraphInstanceAPI | null = null;
 
 function setAuthMessage(message: string, tone: "default" | "error" | "success" = "default") {
   const messageEl = document.getElementById("auth-message")!;
@@ -1861,7 +1863,11 @@ async function loadGraphView() {
       <p>Loading graph&hellip;</p>
     </div>`;
 
-  // Cleanup previous ResizeObserver if any
+  // Cleanup previous graph and ResizeObserver
+  if (graphInstance) {
+    graphInstance.pauseAnimation();
+    graphInstance = null;
+  }
   if (graphResizeObserver) {
     graphResizeObserver.disconnect();
     graphResizeObserver = null;
@@ -1899,11 +1905,14 @@ async function loadGraphView() {
     }
 
     // 300+ node guard: warn and exclude done nodes
+    // Also apply hideOldDone: exclude done nodes older than 3 days
     let tasksForGraph = allTasks;
     let warningHtml = "";
     if (allTasks.length > 300) {
       tasksForGraph = allTasks.filter((t) => t._status !== "done");
       warningHtml = `<div style="position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:10;background:#1e293b;color:#f59e0b;padding:4px 12px;border-radius:6px;font-size:0.8rem;border:1px solid #f59e0b40">${allTasks.length} nodes — done tasks hidden for performance</div>`;
+    } else if (hideOldDone) {
+      tasksForGraph = allTasks.filter((t) => !(t._status === "done" && isOlderThan3Days(t.completed_at || "")));
     }
 
     // Build nodes
@@ -1915,12 +1924,17 @@ async function loadGraphView() {
       tags: string[];
       priority: string;
       project: string;
+      x?: number;
+      y?: number;
     }
     interface GraphLink {
       source: number;
       target: number;
       tag: string;
+      sharedCount: number;
     }
+
+    const q = currentSearch.toLowerCase().replace(/^#/, "");
 
     const nodes: GraphNode[] = tasksForGraph.map((t) => ({
       id: t.id,
@@ -1932,13 +1946,26 @@ async function loadGraphView() {
       project: t.project,
     }));
 
-    // Build edges: shared-tags — deduplicated pairs
+    // Build edges: shared-tags — deduplicated pairs + count shared tags per pair
     const tagIndex = new Map<string, number[]>();
     for (const node of nodes) {
       for (const tag of node.tags) {
         const lowerTag = tag.toLowerCase();
         if (!tagIndex.has(lowerTag)) tagIndex.set(lowerTag, []);
         tagIndex.get(lowerTag)!.push(node.id);
+      }
+    }
+
+    // Count how many tags each pair shares
+    const pairTagCount = new Map<string, number>();
+    for (const [, ids] of tagIndex) {
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = Math.min(ids[i], ids[j]);
+          const b = Math.max(ids[i], ids[j]);
+          const key = `${a}-${b}`;
+          pairTagCount.set(key, (pairTagCount.get(key) || 0) + 1);
+        }
       }
     }
 
@@ -1952,7 +1979,7 @@ async function loadGraphView() {
           const key = `${a}-${b}`;
           if (!linkSet.has(key)) {
             linkSet.add(key);
-            links.push({ source: a, target: b, tag });
+            links.push({ source: a, target: b, tag, sharedCount: pairTagCount.get(key) || 1 });
           }
         }
       }
@@ -1990,8 +2017,16 @@ async function loadGraphView() {
         const x = node.x ?? 0;
         const y = node.y ?? 0;
 
-        // Dim done nodes
-        if (node.status === "done") ctx.globalAlpha = 0.35;
+        // Determine opacity: search dim > done dim
+        let alpha = 1;
+        if (q) {
+          const match = node.title.toLowerCase().includes(q) ||
+            node.tags.some((t) => t.toLowerCase().includes(q));
+          alpha = match ? 1 : 0.15;
+        } else if (node.status === "done") {
+          alpha = 0.35;
+        }
+        ctx.globalAlpha = alpha;
 
         // Filled circle (status color)
         ctx.beginPath();
@@ -2037,12 +2072,22 @@ async function loadGraphView() {
         tooltip.style.display = "block";
       })
       .linkColor(() => "#334155")
-      .linkWidth(0.5)
+      .linkWidth((link: GraphLink) => Math.min(1.5 + (link.sharedCount - 1) * 0.8, 4))
       .warmupTicks(50)
       .cooldownTime(3000)
       .width(el.clientWidth)
       .height(el.clientHeight)
       .graphData({ nodes, links });
+
+    graphInstance = graph as unknown as GraphInstanceAPI;
+
+    // Status legend
+    const legend = document.createElement("div");
+    legend.className = "graph-legend";
+    legend.innerHTML = Object.entries(STATUS_COLORS)
+      .map(([s, c]) => `<div class="graph-legend-item"><span style="background:${c}"></span>${s.replace("_", " ")}</div>`)
+      .join("");
+    el.appendChild(legend);
 
     // ResizeObserver for responsive canvas sizing
     graphResizeObserver = new ResizeObserver((entries) => {
@@ -2499,10 +2544,16 @@ function switchView(view: "board" | "list" | "chronicle" | "graph") {
   const chronicleEl = document.getElementById("chronicle-view")!;
   const graphEl = document.getElementById("graph-view")!;
 
-  // Cleanup graph ResizeObserver when switching away
-  if (graphResizeObserver && view !== "graph") {
-    graphResizeObserver.disconnect();
-    graphResizeObserver = null;
+  // Cleanup graph when switching away
+  if (view !== "graph") {
+    if (graphResizeObserver) {
+      graphResizeObserver.disconnect();
+      graphResizeObserver = null;
+    }
+    if (graphInstance) {
+      graphInstance.pauseAnimation();
+      graphInstance = null;
+    }
   }
 
   // Hide all
@@ -2644,6 +2695,10 @@ document.getElementById("search-input")!.addEventListener("input", (e) => {
     loadBoard();
     return;
   }
+  if (currentView === "graph") {
+    loadGraphView();
+    return;
+  }
   applySearchFilter();
 });
 
@@ -2659,6 +2714,10 @@ document.getElementById("hide-done-btn")!.addEventListener("click", () => {
   hideOldDone = !hideOldDone;
   localStorage.setItem('kanban-hide-old', String(hideOldDone));
   document.getElementById("hide-done-btn")!.classList.toggle("active", hideOldDone);
+  if (currentView === "graph") {
+    loadGraphView();
+    return;
+  }
   applySearchFilter();
 });
 
