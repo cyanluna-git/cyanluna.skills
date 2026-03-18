@@ -1873,6 +1873,7 @@ async function loadGraphView() {
     graphResizeObserver = null;
   }
 
+  // Status → border color (ring around node)
   const STATUS_COLORS: Record<string, string> = {
     todo: "#475569",
     plan: "#3b82f6",
@@ -1882,11 +1883,108 @@ async function loadGraphView() {
     test: "#f59e0b",
     done: "#22c55e",
   };
+  // Tech/topic tag → fill color (Obsidian-style topic clustering)
+  const TOPIC_COLORS: Record<string, string> = {
+    react:           "#61dafb",
+    nextjs:          "#ffffff",
+    typescript:      "#3178c6",
+    tailwind:        "#38bdf8",
+    "react-query":   "#ff4154",
+    vite:            "#a855f7",
+    shadcn:          "#f8fafc",
+    zustand:         "#764abc",
+    hotwire:         "#cc0000",
+    css:             "#264de4",
+    fastapi:         "#009688",
+    rails:           "#cc0000",
+    python:          "#3572a5",
+    nodejs:          "#68a063",
+    ruby:            "#cc342d",
+    postgresql:      "#336791",
+    sqlite:          "#003b57",
+    neon:            "#00e599",
+    supabase:        "#3ecf8e",
+    timescaledb:     "#fdb515",
+    influxdb:        "#22adf6",
+    drizzle:         "#c5f74f",
+    prisma:          "#5a67d8",
+    sqlalchemy:      "#d71f00",
+    oracle:          "#f80000",
+    auth:            "#f59e0b",
+    "auth.js":       "#f59e0b",
+    oauth:           "#f97316",
+    docker:          "#2496ed",
+    "docker-compose":"#2496ed",
+    vercel:          "#ffffff",
+    deploy:          "#10b981",
+    kamal:           "#10b981",
+    gcp:             "#4285f4",
+    azure:           "#0078d4",
+    "ci-cd":         "#f05032",
+    mobile:          "#a78bfa",
+    capacitor:       "#119eff",
+    pwa:             "#5a0fc8",
+    api:             "#64748b",
+    modbus:          "#e67e22",
+    realtime:        "#ef4444",
+    webhook:         "#6366f1",
+    ai:              "#f59e0b",
+    testing:         "#22c55e",
+    storage:         "#0ea5e9",
+    s3:              "#ff9900",
+    r2:              "#f38020",
+    pdf:             "#e53e3e",
+    excel:           "#217346",
+    performance:     "#f97316",
+    cache:           "#8b5cf6",
+    migration:       "#ec4899",
+    maps:            "#34a853",
+    gps:             "#34a853",
+    visualization:   "#06b6d4",
+    dashboard:       "#06b6d4",
+    canvas:          "#f59e0b",
+    graph:           "#06b6d4",
+    chart:           "#06b6d4",
+    modal:           "#94a3b8",
+    refactor:        "#a3a3a3",
+    kanban:          "#818cf8",
+    obsidian:        "#7c3aed",
+    "cycling-data":  "#10b981",
+    euv:             "#e11d48",
+    plc:             "#e11d48",
+    schema:          "#64748b",
+  };
+  // Priority weight for dominant topic selection
+  const TOPIC_PRIORITY_ORDER = [
+    "react","nextjs","typescript","fastapi","rails","python","nodejs",
+    "postgresql","sqlite","neon","supabase","timescaledb","influxdb",
+    "drizzle","prisma","sqlalchemy","oracle",
+    "auth","auth.js","oauth",
+    "docker","docker-compose","vercel","deploy","kamal","gcp","azure","ci-cd",
+    "mobile","capacitor","pwa",
+    "api","modbus","realtime","webhook",
+    "ai","testing","storage","s3","r2","pdf","excel",
+    "performance","cache","migration","maps","gps",
+    "visualization","dashboard","canvas","graph","chart","modal",
+    "refactor","kanban","obsidian","cycling-data","euv","plc","schema",
+  ];
+  function dominantTopic(tags: string[]): string | null {
+    const lower = tags.map((t) => t.toLowerCase());
+    for (const tp of TOPIC_PRIORITY_ORDER) {
+      if (lower.includes(tp)) return tp;
+    }
+    // Fallback: first tag that has a color mapping
+    return lower.find((t) => t in TOPIC_COLORS) ?? null;
+  }
   const LEVEL_SIZES: Record<number, number> = { 1: 4, 2: 7, 3: 10 };
-  const PRIORITY_BORDERS: Record<string, { width: number; color: string }> = {
-    high: { width: 3, color: "#ef4444" },
-    medium: { width: 2, color: "#f59e0b" },
-    low: { width: 1, color: "#64748b" },
+  const STATUS_RING: Record<string, string> = {
+    todo:        "#475569",
+    plan:        "#3b82f6",
+    impl:        "#8b5cf6",
+    impl_review: "#6366f1",
+    plan_review: "#a855f7",
+    test:        "#f59e0b",
+    done:        "#22c55e",
   };
 
   try {
@@ -2028,25 +2126,27 @@ async function loadGraphView() {
         }
         ctx.globalAlpha = alpha;
 
-        // Filled circle (status color)
+        // Fill: topic color (Obsidian-style clustering) or fallback grey
+        const topic = dominantTopic(node.tags);
+        const fillColor = topic ? (TOPIC_COLORS[topic] ?? "#334155") : "#334155";
         ctx.beginPath();
         ctx.arc(x, y, r, 0, 2 * Math.PI);
-        ctx.fillStyle = STATUS_COLORS[node.status] || "#475569";
+        ctx.fillStyle = fillColor;
         ctx.fill();
 
-        // Priority border ring
-        const pb = PRIORITY_BORDERS[node.priority] || PRIORITY_BORDERS.medium;
+        // Status ring (outer ring shows pipeline position)
+        const statusColor = STATUS_RING[node.status] ?? "#475569";
         ctx.beginPath();
-        ctx.arc(x, y, r + pb.width / 2, 0, 2 * Math.PI);
-        ctx.strokeStyle = pb.color;
-        ctx.lineWidth = pb.width / globalScale;
+        ctx.arc(x, y, r + 1.5 / globalScale, 0, 2 * Math.PI);
+        ctx.strokeStyle = statusColor;
+        ctx.lineWidth = 1.5 / globalScale;
         ctx.stroke();
 
-        // Node label — always visible, Obsidian style
+        // Node label — Obsidian style
         const label = node.title.replace(/^#\d+\s*/, "").slice(0, 40);
         const fontSize = Math.max(3, 11 / globalScale);
         ctx.font = `${fontSize}px sans-serif`;
-        ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.25)" : "#cbd5e1";
+        ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.2)" : "#cbd5e1";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(label, x + r + 3 / globalScale, y);
@@ -2070,17 +2170,25 @@ async function loadGraphView() {
           tooltip.style.display = "none";
           return;
         }
-        const tagsSlice = node.tags.slice(0, 3);
-        const tagsHtml = tagsSlice.length
-          ? `<div class="graph-tooltip-tags">${tagsSlice.map((t) => `<span>${t}</span>`).join("")}</div>`
+        const topicTag = dominantTopic(node.tags);
+        const topicColor = topicTag ? (TOPIC_COLORS[topicTag] ?? null) : null;
+        const topicBadge = topicTag
+          ? `<span style="background:${topicColor};color:#0f172a;padding:1px 7px;border-radius:4px;font-weight:600">${topicTag}</span>`
+          : "";
+        const otherTags = node.tags.filter((t) => t.toLowerCase() !== topicTag).slice(0, 3);
+        const tagsHtml = otherTags.length
+          ? `<div class="graph-tooltip-tags">${otherTags.map((t) => `<span>${t}</span>`).join("")}</div>`
           : "";
         tooltip.innerHTML = `
           <div class="graph-tooltip-title">${node.title}</div>
-          <div class="graph-tooltip-meta">${node.status} &middot; ${node.priority} &middot; L${node.level}</div>
+          <div class="graph-tooltip-meta" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            ${topicBadge}
+            <span>${node.status} &middot; ${node.priority} &middot; L${node.level}</span>
+          </div>
           ${tagsHtml}`;
         tooltip.style.display = "block";
       })
-      .linkColor(() => "#475569")
+      .linkColor((link: GraphLink) => TOPIC_COLORS[link.tag.toLowerCase()] ?? "#334155")
       .linkWidth((link: GraphLink) => Math.min(1.5 + (link.sharedCount - 1) * 0.8, 4))
       .d3AlphaDecay(0.02)
       .d3VelocityDecay(0.3)
@@ -2092,13 +2200,19 @@ async function loadGraphView() {
 
     graphInstance = graph as unknown as GraphInstanceAPI;
 
-    // Status legend
-    const legend = document.createElement("div");
-    legend.className = "graph-legend";
-    legend.innerHTML = Object.entries(STATUS_COLORS)
-      .map(([s, c]) => `<div class="graph-legend-item"><span style="background:${c}"></span>${s.replace("_", " ")}</div>`)
-      .join("");
-    el.appendChild(legend);
+    // Topic legend — show only topics actually present in this graph
+    const presentTopics = new Set(nodes.flatMap((n) => n.tags.map((t) => t.toLowerCase())));
+    const legendTopics = TOPIC_PRIORITY_ORDER
+      .filter((t) => presentTopics.has(t) && t in TOPIC_COLORS)
+      .slice(0, 16);
+    if (legendTopics.length > 0) {
+      const legend = document.createElement("div");
+      legend.className = "graph-legend";
+      legend.innerHTML = legendTopics
+        .map((t) => `<div class="graph-legend-item"><span style="background:${TOPIC_COLORS[t]}"></span>${t}</div>`)
+        .join("");
+      el.appendChild(legend);
+    }
 
     // ResizeObserver for responsive canvas sizing
     graphResizeObserver = new ResizeObserver((entries) => {
