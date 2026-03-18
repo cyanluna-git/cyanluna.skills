@@ -1334,7 +1334,7 @@ async function showTaskDetail(id: number, project?: string) {
         <div class="phase-body hidden" id="req-body-edit">
           <textarea id="req-textarea" rows="8">${(task.description || '').replace(/</g, '&lt;')}</textarea>
           <div class="attachment-drop-zone" id="attachment-drop-zone">
-            <span>\u{1F4CE} Drop images here or click to attach</span>
+            <span>\u{1F4CE} Drop images, paste (⌘V), or click to attach</span>
             <input type="file" id="attachment-input" accept="image/*" multiple hidden />
           </div>
           ${attachmentsHtml ? `<div id="edit-attachments">${attachmentsHtml}</div>` : ''}
@@ -1614,6 +1614,14 @@ async function showTaskDetail(id: number, project?: string) {
         if (fileInput.files) await uploadFiles(id, fileInput.files, task.project);
       });
     }
+
+    // Clipboard paste → image attachment
+    content.addEventListener("paste", async (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+      if (files.length === 0) return;
+      e.preventDefault();
+      await uploadFiles(id, files, task.project);
+    });
 
     // Attachment remove buttons
     content.querySelectorAll(".attachment-remove").forEach((btn) => {
@@ -2518,6 +2526,12 @@ addAttachZone.addEventListener("drop", (e) => {
 addAttachInput.addEventListener("change", () => {
   if (addAttachInput.files) addPendingFiles(addAttachInput.files);
   addAttachInput.value = "";
+});
+addCardOverlay.addEventListener("paste", (e: ClipboardEvent) => {
+  const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+  if (files.length === 0) return;
+  e.preventDefault();
+  addPendingFiles(files);
 });
 
 document.getElementById("add-card-form")!.addEventListener("submit", async (e) => {
