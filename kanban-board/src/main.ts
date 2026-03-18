@@ -153,6 +153,7 @@ let currentBoardVersionEtag: string | null = null;
 const summaryBoardCache = new Map<string, Board>();
 const summaryBoardEtagCache = new Map<string, string>();
 const summaryRevalidation = new Map<string, Promise<void>>();
+let graphResizeObserver: ResizeObserver | null = null;
 
 function setAuthMessage(message: string, tone: "default" | "error" | "success" = "default") {
   const messageEl = document.getElementById("auth-message")!;
@@ -1860,13 +1861,136 @@ async function loadGraphView() {
       <p>Loading graph&hellip;</p>
     </div>`;
 
-  // Phase 2 will replace this placeholder with a force-directed graph
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  // Cleanup previous ResizeObserver if any
+  if (graphResizeObserver) {
+    graphResizeObserver.disconnect();
+    graphResizeObserver = null;
+  }
 
-  el.innerHTML = `
-    <div class="graph-placeholder">
-      <p style="color:#64748b;font-size:0.9rem">Graph view — coming soon</p>
-    </div>`;
+  const STATUS_COLORS: Record<string, string> = {
+    todo: "#475569",
+    plan: "#3b82f6",
+    impl: "#8b5cf6",
+    impl_review: "#6366f1",
+    plan_review: "#a855f7",
+    test: "#f59e0b",
+    done: "#22c55e",
+  };
+  const LEVEL_SIZES: Record<number, number> = { 1: 4, 2: 7, 3: 10 };
+
+  try {
+    const [{ default: ForceGraph }, data] = await Promise.all([
+      import("force-graph"),
+      fetchSummaryBoard("full"),
+    ]);
+
+    // Collect all tasks across columns
+    const allTasks: (Task & { _status: string })[] = [];
+    for (const col of COLUMNS) {
+      const tasks = data[col.key as keyof Omit<Board, "projects" | "counts">] as Task[];
+      for (const t of tasks) {
+        allTasks.push({ ...t, _status: col.key });
+      }
+    }
+
+    // 300+ node guard: warn and exclude done nodes
+    let tasksForGraph = allTasks;
+    let warningHtml = "";
+    if (allTasks.length > 300) {
+      tasksForGraph = allTasks.filter((t) => t._status !== "done");
+      warningHtml = `<div style="position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:10;background:#1e293b;color:#f59e0b;padding:4px 12px;border-radius:6px;font-size:0.8rem;border:1px solid #f59e0b40">${allTasks.length} nodes — done tasks hidden for performance</div>`;
+    }
+
+    // Build nodes
+    interface GraphNode {
+      id: number;
+      title: string;
+      status: string;
+      level: number;
+      tags: string[];
+    }
+    interface GraphLink {
+      source: number;
+      target: number;
+      tag: string;
+    }
+
+    const nodes: GraphNode[] = tasksForGraph.map((t) => ({
+      id: t.id,
+      title: `#${t.id} ${t.title}`,
+      status: t._status,
+      level: t.level ?? 1,
+      tags: parseTags(t.tags),
+    }));
+
+    // Build edges: shared-tags — deduplicated pairs
+    const tagIndex = new Map<string, number[]>();
+    for (const node of nodes) {
+      for (const tag of node.tags) {
+        const lowerTag = tag.toLowerCase();
+        if (!tagIndex.has(lowerTag)) tagIndex.set(lowerTag, []);
+        tagIndex.get(lowerTag)!.push(node.id);
+      }
+    }
+
+    const linkSet = new Set<string>();
+    const links: GraphLink[] = [];
+    for (const [tag, ids] of tagIndex) {
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = Math.min(ids[i], ids[j]);
+          const b = Math.max(ids[i], ids[j]);
+          const key = `${a}-${b}`;
+          if (!linkSet.has(key)) {
+            linkSet.add(key);
+            links.push({ source: a, target: b, tag });
+          }
+        }
+      }
+    }
+
+    // Clear and render
+    el.innerHTML = warningHtml;
+    el.style.position = "relative";
+    el.style.padding = "0";
+
+    const graphContainer = document.createElement("div");
+    graphContainer.style.width = "100%";
+    graphContainer.style.height = "100%";
+    el.appendChild(graphContainer);
+
+    const graph = ForceGraph()(graphContainer)
+      .backgroundColor("#0f172a")
+      .nodeId("id")
+      .nodeLabel("title")
+      .nodeColor((node: GraphNode) => STATUS_COLORS[node.status] || "#475569")
+      .nodeVal((node: GraphNode) => LEVEL_SIZES[node.level] || LEVEL_SIZES[1])
+      .linkColor(() => "#334155")
+      .linkWidth(0.5)
+      .warmupTicks(50)
+      .cooldownTime(3000)
+      .width(el.clientWidth)
+      .height(el.clientHeight)
+      .graphData({ nodes, links });
+
+    // ResizeObserver for responsive canvas sizing
+    graphResizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          graph.width(width).height(height);
+        }
+      }
+    });
+    graphResizeObserver.observe(el);
+
+  } catch (err) {
+    console.error("loadGraphView failed:", err);
+    el.innerHTML = `
+      <div class="graph-placeholder">
+        <p style="color:#ef4444;font-size:0.9rem">Failed to load graph</p>
+      </div>`;
+  }
 }
 
 async function loadBoard() {
@@ -2303,6 +2427,12 @@ function switchView(view: "board" | "list" | "chronicle" | "graph") {
   const listEl = document.getElementById("list-view")!;
   const chronicleEl = document.getElementById("chronicle-view")!;
   const graphEl = document.getElementById("graph-view")!;
+
+  // Cleanup graph ResizeObserver when switching away
+  if (graphResizeObserver && view !== "graph") {
+    graphResizeObserver.disconnect();
+    graphResizeObserver = null;
+  }
 
   // Hide all
   boardEl.classList.add("hidden");
