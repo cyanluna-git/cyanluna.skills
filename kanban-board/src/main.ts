@@ -1171,19 +1171,61 @@ function renderTestEntries(results: any[]): string {
   `).join('');
 }
 
+async function compressImage(file: File, maxSize = 1920, quality = 0.82): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          height = Math.round((height * maxSize) / width);
+          width = maxSize;
+        } else {
+          width = Math.round((width * maxSize) / height);
+          height = maxSize;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Image load failed")); };
+    img.src = url;
+  });
+}
+
 async function uploadFiles(taskId: number, files: FileList | File[], project: string) {
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
-    const reader = new FileReader();
-    const data: string = await new Promise((resolve) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.readAsDataURL(file);
-    });
-    await apiFetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
+    let data: string;
+    try {
+      data = await compressImage(file);
+    } catch {
+      // fallback: raw base64 (e.g. SVG)
+      data = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+    }
+    const ext = file.name.match(/\.[^.]+$/)?.[0]?.toLowerCase();
+    const filename = (ext === ".jpg" || ext === ".jpeg" || ext === ".png" || ext === ".webp" || ext === ".gif" || ext === ".svg")
+      ? file.name
+      : file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    const res = await apiFetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: file.name, data }),
+      body: JSON.stringify({ filename, data }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      showToast(err.error || `Upload failed (${res.status})`);
+      return;
+    }
   }
   showTaskDetail(taskId, project);
 }
