@@ -1877,6 +1877,11 @@ async function loadGraphView() {
     done: "#22c55e",
   };
   const LEVEL_SIZES: Record<number, number> = { 1: 4, 2: 7, 3: 10 };
+  const PRIORITY_BORDERS: Record<string, { width: number; color: string }> = {
+    high: { width: 3, color: "#ef4444" },
+    medium: { width: 2, color: "#f59e0b" },
+    low: { width: 1, color: "#64748b" },
+  };
 
   try {
     const [{ default: ForceGraph }, data] = await Promise.all([
@@ -1908,6 +1913,8 @@ async function loadGraphView() {
       status: string;
       level: number;
       tags: string[];
+      priority: string;
+      project: string;
     }
     interface GraphLink {
       source: number;
@@ -1921,6 +1928,8 @@ async function loadGraphView() {
       status: t._status,
       level: t.level ?? 1,
       tags: parseTags(t.tags),
+      priority: t.priority || "medium",
+      project: t.project,
     }));
 
     // Build edges: shared-tags — deduplicated pairs
@@ -1959,12 +1968,74 @@ async function loadGraphView() {
     graphContainer.style.height = "100%";
     el.appendChild(graphContainer);
 
+    // Tooltip element
+    const tooltip = document.createElement("div");
+    tooltip.className = "graph-tooltip";
+    el.appendChild(tooltip);
+
+    // Track mouse position for tooltip placement
+    el.addEventListener("mousemove", (e) => {
+      const rect = el.getBoundingClientRect();
+      tooltip.style.left = `${e.clientX - rect.left + 12}px`;
+      tooltip.style.top = `${e.clientY - rect.top + 12}px`;
+    });
+
     const graph = ForceGraph()(graphContainer)
       .backgroundColor("#0f172a")
       .nodeId("id")
-      .nodeLabel("title")
-      .nodeColor((node: GraphNode) => STATUS_COLORS[node.status] || "#475569")
+      .nodeLabel(() => "")
       .nodeVal((node: GraphNode) => LEVEL_SIZES[node.level] || LEVEL_SIZES[1])
+      .nodeCanvasObject((node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+        const r = Math.sqrt(LEVEL_SIZES[node.level] || LEVEL_SIZES[1]) * 2;
+        const x = node.x ?? 0;
+        const y = node.y ?? 0;
+
+        // Dim done nodes
+        if (node.status === "done") ctx.globalAlpha = 0.35;
+
+        // Filled circle (status color)
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, 2 * Math.PI);
+        ctx.fillStyle = STATUS_COLORS[node.status] || "#475569";
+        ctx.fill();
+
+        // Priority border ring
+        const pb = PRIORITY_BORDERS[node.priority] || PRIORITY_BORDERS.medium;
+        ctx.beginPath();
+        ctx.arc(x, y, r + pb.width / 2, 0, 2 * Math.PI);
+        ctx.strokeStyle = pb.color;
+        ctx.lineWidth = pb.width / globalScale;
+        ctx.stroke();
+
+        // Reset alpha
+        ctx.globalAlpha = 1;
+      })
+      .nodePointerAreaPaint((node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
+        const r = Math.sqrt(LEVEL_SIZES[node.level] || LEVEL_SIZES[1]) * 2 + 2;
+        ctx.beginPath();
+        ctx.arc(node.x ?? 0, node.y ?? 0, r, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+      })
+      .onNodeClick((node: GraphNode) => {
+        showTaskDetail(node.id, node.project);
+      })
+      .onNodeHover((node: GraphNode | null) => {
+        graphContainer.style.cursor = node ? "pointer" : "default";
+        if (!node) {
+          tooltip.style.display = "none";
+          return;
+        }
+        const tagsSlice = node.tags.slice(0, 3);
+        const tagsHtml = tagsSlice.length
+          ? `<div class="graph-tooltip-tags">${tagsSlice.map((t) => `<span>${t}</span>`).join("")}</div>`
+          : "";
+        tooltip.innerHTML = `
+          <div class="graph-tooltip-title">${node.title}</div>
+          <div class="graph-tooltip-meta">${node.status} &middot; ${node.priority} &middot; L${node.level}</div>
+          ${tagsHtml}`;
+        tooltip.style.display = "block";
+      })
       .linkColor(() => "#334155")
       .linkWidth(0.5)
       .warmupTicks(50)
@@ -2595,21 +2666,25 @@ document.getElementById("hide-done-btn")!.addEventListener("click", () => {
 document.getElementById("modal-close")!.addEventListener("click", () => {
   document.getElementById("modal-overlay")!.classList.add("hidden");
   syncOverlayState();
+  refreshCurrentView();
 });
 document.getElementById("modal-overlay")!.addEventListener("click", (e) => {
   if (e.target === e.currentTarget) {
     document.getElementById("modal-overlay")!.classList.add("hidden");
     syncOverlayState();
+    refreshCurrentView();
   }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    const modalWasOpen = !document.getElementById("modal-overlay")!.classList.contains("hidden");
     document.getElementById("modal-overlay")!.classList.add("hidden");
     document.getElementById("add-card-overlay")!.classList.add("hidden");
     if (!document.getElementById("auth-overlay")!.classList.contains("hidden") && authReady) {
       hideAuthOverlay();
     }
     syncOverlayState();
+    if (modalWasOpen) refreshCurrentView();
   }
 });
 
