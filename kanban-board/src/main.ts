@@ -1985,14 +1985,14 @@ async function loadGraphView() {
       }
     }
 
-    // Clear and render
+    // Clear and render — fix overflow so canvas stays in bounds
     el.innerHTML = warningHtml;
     el.style.position = "relative";
     el.style.padding = "0";
+    el.style.overflow = "hidden";
 
     const graphContainer = document.createElement("div");
-    graphContainer.style.width = "100%";
-    graphContainer.style.height = "100%";
+    graphContainer.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
     el.appendChild(graphContainer);
 
     // Tooltip element
@@ -2042,6 +2042,15 @@ async function loadGraphView() {
         ctx.lineWidth = pb.width / globalScale;
         ctx.stroke();
 
+        // Node label — always visible, Obsidian style
+        const label = node.title.replace(/^#\d+\s*/, "").slice(0, 40);
+        const fontSize = Math.max(3, 11 / globalScale);
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.25)" : "#cbd5e1";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, x + r + 3 / globalScale, y);
+
         // Reset alpha
         ctx.globalAlpha = 1;
       })
@@ -2071,12 +2080,14 @@ async function loadGraphView() {
           ${tagsHtml}`;
         tooltip.style.display = "block";
       })
-      .linkColor(() => "#334155")
+      .linkColor(() => "#475569")
       .linkWidth((link: GraphLink) => Math.min(1.5 + (link.sharedCount - 1) * 0.8, 4))
-      .warmupTicks(50)
-      .cooldownTime(3000)
-      .width(el.clientWidth)
-      .height(el.clientHeight)
+      .d3AlphaDecay(0.02)
+      .d3VelocityDecay(0.3)
+      .warmupTicks(100)
+      .cooldownTime(5000)
+      .width(el.offsetWidth || window.innerWidth)
+      .height(el.offsetHeight || window.innerHeight - 112)
       .graphData({ nodes, links });
 
     graphInstance = graph as unknown as GraphInstanceAPI;
