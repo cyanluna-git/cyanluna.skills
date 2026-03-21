@@ -51,7 +51,18 @@ cp -R cyanluna.skills/kanban-init    ~/.claude/skills/
 cp -R cyanluna.skills/kanban-explore ~/.claude/skills/
 ```
 
-**2. Initialize a project** (inside any project directory)
+**2. Install the web board**
+
+```bash
+# Install pnpm if you don't have it
+npm install -g pnpm
+
+# Copy the board app to ~/.claude and install its dependencies
+cp -R cyanluna.skills/kanban-board ~/.claude/kanban-board
+pnpm --dir ~/.claude/kanban-board install
+```
+
+**3. Initialize a project** (inside any project directory)
 
 ```
 /kanban-init
@@ -59,10 +70,10 @@ cp -R cyanluna.skills/kanban-explore ~/.claude/skills/
 
 This creates `.claude/kanban.json`, a per-project SQLite DB at `~/.claude/kanban-dbs/{project}.db`, and a `kanban-board/start.sh` launcher.
 
-**3. Start the board and add tasks**
+**4. Start the board and add tasks**
 
 ```bash
-./kanban-board/start.sh        # opens http://localhost:5173
+./kanban-board/start.sh        # opens http://localhost:5173/?project=<your-project>
 ```
 
 ```
