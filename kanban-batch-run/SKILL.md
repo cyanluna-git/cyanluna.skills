@@ -149,6 +149,7 @@ When finished, summarize:
 ## Inner Task Contract
 
 For every task selected in the batch, invoke the `kanban-run` skill via the Skill tool.
+The batch runner must inherit `kanban-run`'s provider-aware model router, so Codex batch execution automatically uses the higher-tier Codex mappings from `../kanban/models.json`.
 
 ### Level-aware invocation
 
