@@ -58,7 +58,9 @@ const STATUS_BADGES: Record<string, string> = {
   test:        "Testing",
 };
 
-let currentProject: string | null = localStorage.getItem('kanban-project');
+const _urlProject = new URLSearchParams(window.location.search).get('project');
+if (_urlProject) localStorage.setItem('kanban-project', _urlProject);
+let currentProject: string | null = _urlProject || localStorage.getItem('kanban-project');
 let isDragging = false;
 let currentView: "board" | "list" = "board";
 let currentSearch: string = '';
@@ -1256,15 +1258,10 @@ function showToast(message: string) {
 }
 
 // Set tab title to project name
-fetch("/api/info")
-  .then((r) => r.json())
-  .then((info: { projectName: string }) => {
-    if (info.projectName) {
-      document.title = `Kanban \u00b7 ${info.projectName}`;
-      document.querySelector("header h1")!.textContent = `Kanban \u00b7 ${info.projectName}`;
-    }
-  })
-  .catch(() => {});
+if (currentProject) {
+  document.title = `Kanban \u00b7 ${currentProject}`;
+  document.querySelector("header h1")!.textContent = `Kanban \u00b7 ${currentProject}`;
+}
 
 function switchView(view: "board" | "list") {
   currentView = view;
