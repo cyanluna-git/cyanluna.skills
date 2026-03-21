@@ -134,6 +134,11 @@ This skill explores first, reports direction, then seeds the kanban board with p
    - 3–7 tasks in logical implementation order
    - Each task completable independently in one pipeline run
    - Split if a task would touch more than 3 unrelated files
+   - **The LAST task must always be an E2E test task.**
+     Title format: "Add E2E tests for <topic>"
+     Description should cover: key user flows to verify, happy path + edge cases,
+     which pages/endpoints to test, and acceptance criteria.
+     Priority: medium, Level: L2, extra tag: "e2e-test"
 
    For each task determine:
    - title: concise imperative verb phrase ("Add X", "Refactor Y", "Integrate Z")
