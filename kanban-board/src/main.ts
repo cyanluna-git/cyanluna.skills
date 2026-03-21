@@ -1108,9 +1108,11 @@ async function loadListView() {
 function renderProjectFilter(projects: string[]) {
   const container = document.getElementById("project-filter")!;
   if (projects.length <= 1) {
-    container.innerHTML = projects[0]
-      ? `<span class="project-label">${projects[0]}</span>`
-      : "";
+    if (projects[0]) {
+      currentProject = projects[0];
+      localStorage.setItem('kanban-project', projects[0]);
+      container.innerHTML = `<span class="project-label">${projects[0]}</span>`;
+    }
     return;
   }
 
