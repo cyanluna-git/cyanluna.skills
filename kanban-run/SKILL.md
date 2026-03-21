@@ -52,6 +52,8 @@ Resolve real model names from `../kanban/models.json` using provider:
 - else `codex` when `.codex/` exists
 - else `default_provider` from `models.json`
 
+For Codex, the router should prefer the higher-capability entries in `models.json` for the full `kanban-run` pipeline.
+
 ```bash
 MODEL_PROVIDER=${KANBAN_MODEL_PROVIDER:-}
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi

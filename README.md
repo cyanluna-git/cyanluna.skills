@@ -110,14 +110,15 @@ Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 | Column | Agent | Model (Claude / Codex) | What happens |
 |--------|-------|-------|--------------|
 | **Requirements** | User | — | You describe what needs to be done |
-| **Plan** | `Planner` | opus / gpt-5.2 | Reads requirements, writes plan + decision log + done-when checklist |
-| **Review Plan** | `Critic` | sonnet / gpt-5.2 | Scores plan on 3 dimensions, approves or requests changes |
+| **Plan** | `Planner` | opus / gpt-5.4 | Reads requirements, writes plan + decision log + done-when checklist |
+| **Review Plan** | `Critic` | sonnet / gpt-5.4 | Scores plan on 3 dimensions, approves or requests changes |
 | **Implement** | `Builder` + `Shield` | opus+sonnet / gpt-5.3-codex | Builder implements; Shield writes TDD tests |
-| **Review Impl** | `Inspector` | sonnet / gpt-5.2 | Scores code on 7 dimensions, approves or rejects |
+| **Review Impl** | `Inspector` | sonnet / gpt-5.4 | Scores code on 7 dimensions, approves or rejects |
 | **Test** | `Ranger` | sonnet / gpt-5.3-codex | Runs lint, build, and test suite |
 | **Done** | — | — | Auto-commits with `[kanban #ID]` tag |
 
 Model routing is provider-aware via `kanban/models.json`.
+Under Codex, `kanban-run` and `kanban-batch-run` intentionally resolve to the higher-capability Codex route for the pipeline agents.
 
 ### Pipeline Levels
 
@@ -137,11 +138,11 @@ Each agent has a fixed **nickname** used as a signature in every field and log e
 
 | Nickname | Role | Model (Claude / Codex) | Reads | Writes |
 |----------|------|-------|-------|--------|
-| `Planner` | Plan Agent | opus / gpt-5.2 | description | plan, decision_log, done_when |
-| `Critic` | Plan Review | sonnet / gpt-5.2 | description, plan, decision_log, done_when | plan_review_comments |
+| `Planner` | Plan Agent | opus / gpt-5.4 | description | plan, decision_log, done_when |
+| `Critic` | Plan Review | sonnet / gpt-5.4 | description, plan, decision_log, done_when | plan_review_comments |
 | `Builder` | Worker | opus / gpt-5.3-codex | description, plan, done_when, review comments | implementation_notes |
 | `Shield` | TDD Tester | sonnet / gpt-5.3-codex | description, implementation_notes | implementation_notes (append) |
-| `Inspector` | Code Review | sonnet / gpt-5.2 | description, plan, done_when, implementation_notes | review_comments |
+| `Inspector` | Code Review | sonnet / gpt-5.4 | description, plan, done_when, implementation_notes | review_comments |
 | `Ranger` | Test Runner | sonnet / gpt-5.3-codex | implementation_notes | test_results |
 | `Refiner` | Requirements Refinement | opus / gpt-5.2 | title, description | description (rewrite) |
 
