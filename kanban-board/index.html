@@ -38,39 +38,55 @@
       <div class="header-meta">
         <button id="auth-btn" class="toolbar-toggle-btn" title="Shared token access">Private</button>
         <span id="count-summary"></span>
+        <span id="hidden-stage-count"></span>
         <button id="refresh-btn" title="Refresh">&#x21bb;</button>
       </div>
     </header>
     <aside class="sidebar">
+      <button class="sidebar-show-all-btn" id="sidebar-show-all" style="display:none">Show All</button>
       <nav class="sidebar-nav">
-        <button class="sidebar-item" data-stage="todo">
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="todo">
           <span class="sidebar-icon">📋</span>
           <span class="sidebar-label">Todo</span>
-        </button>
-        <button class="sidebar-item" data-stage="plan">
+          <span class="sidebar-badge" data-stage="todo"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="plan">
           <span class="sidebar-icon">🗺️</span>
           <span class="sidebar-label">Plan</span>
-        </button>
-        <button class="sidebar-item" data-stage="plan_review">
+          <span class="sidebar-badge" data-stage="plan"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="plan_review">
           <span class="sidebar-icon">🔍</span>
           <span class="sidebar-label">Review Plan</span>
-        </button>
-        <button class="sidebar-item" data-stage="impl">
+          <span class="sidebar-badge" data-stage="plan_review"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="impl">
           <span class="sidebar-icon">💻</span>
           <span class="sidebar-label">Implement</span>
-        </button>
-        <button class="sidebar-item" data-stage="impl_review">
+          <span class="sidebar-badge" data-stage="impl"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="impl_review">
           <span class="sidebar-icon">🔎</span>
           <span class="sidebar-label">Review Impl</span>
-        </button>
-        <button class="sidebar-item" data-stage="test">
+          <span class="sidebar-badge" data-stage="impl_review"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="test">
           <span class="sidebar-icon">🧪</span>
           <span class="sidebar-label">Test</span>
-        </button>
-        <button class="sidebar-item" data-stage="done">
+          <span class="sidebar-badge" data-stage="test"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="done">
           <span class="sidebar-icon">✅</span>
           <span class="sidebar-label">Done</span>
-        </button>
+          <span class="sidebar-badge" data-stage="done"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
       </nav>
       <button class="sidebar-collapse-btn" id="sidebar-collapse-btn">&#x2039;</button>
     </aside>

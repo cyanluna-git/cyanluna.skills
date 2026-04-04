@@ -212,6 +212,61 @@ aside.sidebar[data-collapsed] .sidebar-label {
   font-weight: 600;
 }
 
+/* Sidebar badge */
+.sidebar-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--color-surface-card-high);
+  color: var(--color-on-surface-variant);
+  margin-left: auto;
+  display: none;
+}
+.sidebar-badge:not(:empty):not([data-count="0"]) { display: inline-block; }
+
+/* Eye button — hover reveal */
+.sidebar-eye-btn {
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 2px;
+  margin-left: 4px;
+  color: var(--color-outline);
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.sidebar-item:hover .sidebar-eye-btn { opacity: 1; }
+aside.sidebar[data-collapsed] .sidebar-eye-btn { display: none; }
+
+/* Hidden stage */
+.sidebar-item.hidden-stage { opacity: 0.4; }
+
+/* Show All button */
+.sidebar-show-all-btn {
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(64,72,93,0.15);
+  color: var(--color-primary, #60a5fa);
+  cursor: pointer;
+  text-align: left;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sidebar-show-all-btn:hover { background: var(--color-surface-card); }
+
+/* Hidden count in header */
+#hidden-stage-count {
+  font-size: 0.75rem;
+  color: var(--color-on-surface-variant);
+}
+
 .sidebar-collapse-btn {
   display: flex;
   align-items: center;

@@ -161,6 +161,11 @@ let graphResizeObserver: ResizeObserver | null = null;
 interface GraphInstanceAPI { pauseAnimation: () => void; }
 let graphInstance: GraphInstanceAPI | null = null;
 let sidebarObserver: IntersectionObserver | null = null;
+const VALID_STAGES = new Set(['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']);
+const hiddenStages = new Set<string>(
+  (JSON.parse(localStorage.getItem('kanban-hidden-stages') || '[]') as string[])
+    .filter(s => VALID_STAGES.has(s))
+);
 
 function debounce<A extends string[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>;
@@ -177,14 +182,18 @@ function setActiveSidebarItem(stage: string): void {
 }
 
 function bindSidebarItems(sidebar: HTMLElement): void {
-  sidebar.querySelectorAll<HTMLButtonElement>('.sidebar-item[data-stage]').forEach(btn => {
-    const fresh = btn.cloneNode(true) as HTMLButtonElement;
-    btn.parentNode?.replaceChild(fresh, btn);
-    fresh.addEventListener('click', () => {
+  sidebar.querySelectorAll<HTMLElement>('.sidebar-item[data-stage]').forEach(item => {
+    const fresh = item.cloneNode(true) as HTMLElement;
+    item.parentNode?.replaceChild(fresh, item);
+    const activate = () => {
       const stage = fresh.dataset.stage!;
       setActiveSidebarItem(stage);
       document.querySelector<HTMLElement>(`.column[data-column="${stage}"]`)
         ?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+    };
+    fresh.addEventListener('click', activate);
+    fresh.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
     });
   });
 }
@@ -235,6 +244,91 @@ function initIntersectionObserver(): void {
   });
 }
 
+function applyHiddenStages(): void {
+  hiddenStages.forEach(stage => {
+    const col = document.querySelector<HTMLElement>(`[data-column="${stage}"]`);
+    if (col) col.style.display = 'none';
+    document.querySelector<HTMLElement>(`.sidebar-item[data-stage="${stage}"]`)
+      ?.classList.add('hidden-stage');
+  });
+  updateShowAllBtn();
+  updateHiddenCountIndicator();
+}
+
+function updateShowAllBtn(): void {
+  const btn = document.getElementById('sidebar-show-all') as HTMLButtonElement | null;
+  if (btn) btn.style.display = hiddenStages.size > 0 ? '' : 'none';
+}
+
+function updateHiddenCountIndicator(): void {
+  const el = document.getElementById('hidden-stage-count');
+  if (!el) return;
+  el.textContent = hiddenStages.size > 0 ? `\u00b7 ${hiddenStages.size} hidden` : '';
+}
+
+function updateSidebarBadges(): void {
+  document.querySelectorAll<HTMLElement>('.sidebar-item[data-stage]').forEach(item => {
+    const stage = item.dataset.stage!;
+    const countEl = document.querySelector<HTMLElement>(`[data-column="${stage}"] .count`);
+    const badge = item.querySelector<HTMLElement>('.sidebar-badge');
+    if (!badge) return;
+    const count = countEl?.textContent?.trim() ?? '0';
+    badge.textContent = count;
+    badge.dataset.count = count;
+  });
+}
+
+function toggleStageVisibility(stage: string): void {
+  const col = document.querySelector<HTMLElement>(`[data-column="${stage}"]`);
+  const item = document.querySelector<HTMLElement>(`.sidebar-item[data-stage="${stage}"]`);
+  if (hiddenStages.has(stage)) {
+    hiddenStages.delete(stage);
+    if (col) col.style.display = '';
+    item?.classList.remove('hidden-stage');
+  } else {
+    hiddenStages.add(stage);
+    if (col) col.style.display = 'none';
+    item?.classList.add('hidden-stage');
+  }
+  localStorage.setItem('kanban-hidden-stages', JSON.stringify([...hiddenStages]));
+  updateShowAllBtn();
+  updateHiddenCountIndicator();
+}
+
+function showAllStages(): void {
+  hiddenStages.forEach(stage => {
+    const col = document.querySelector<HTMLElement>(`[data-column="${stage}"]`);
+    if (col) col.style.display = '';
+    document.querySelector<HTMLElement>(`.sidebar-item[data-stage="${stage}"]`)
+      ?.classList.remove('hidden-stage');
+  });
+  hiddenStages.clear();
+  localStorage.removeItem('kanban-hidden-stages');
+  updateShowAllBtn();
+  updateHiddenCountIndicator();
+}
+
+function bindEyeButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>('.sidebar-eye-btn').forEach(btn => {
+    const fresh = btn.cloneNode(true) as HTMLButtonElement;
+    btn.parentNode?.replaceChild(fresh, btn);
+    fresh.addEventListener('click', (e: MouseEvent) => {
+      e.stopPropagation();
+      const stage = (fresh.closest<HTMLElement>('.sidebar-item[data-stage]'))?.dataset.stage;
+      if (stage) toggleStageVisibility(stage);
+    });
+  });
+}
+
+function bindShowAllButton(): void {
+  const showAllBtn = document.getElementById('sidebar-show-all');
+  if (showAllBtn) {
+    const fresh = showAllBtn.cloneNode(true) as HTMLButtonElement;
+    showAllBtn.parentNode?.replaceChild(fresh, showAllBtn);
+    fresh.addEventListener('click', showAllStages);
+  }
+}
+
 function initSidebar(): void {
   const sidebar = document.querySelector<HTMLElement>('aside.sidebar');
   if (!sidebar) return;
@@ -242,6 +336,8 @@ function initSidebar(): void {
     sidebar.setAttribute('data-collapsed', '');
   }
   bindSidebarItems(sidebar);
+  bindEyeButtons();
+  bindShowAllButton();
   bindCollapseToggle(sidebar);
   initIntersectionObserver();
 }
@@ -2445,6 +2541,8 @@ async function loadBoard() {
     applySearchFilter();
     applyClientCategoryFilter();
     initSidebar();
+    applyHiddenStages();
+    updateSidebarBadges();
 
     const addBtn = document.getElementById("add-card-btn");
     if (addBtn) {
