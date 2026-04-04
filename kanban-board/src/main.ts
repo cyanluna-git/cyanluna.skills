@@ -1851,6 +1851,8 @@ async function loadChronicleView() {
       });
     });
 
+    applyClientCategoryFilter();
+
   } catch (err) {
     console.error("loadChronicleView failed:", err);
     el.innerHTML = `
@@ -2323,6 +2325,7 @@ async function loadBoard() {
     }
     setupMobileBoardInteractions();
     applySearchFilter();
+    applyClientCategoryFilter();
 
     const addBtn = document.getElementById("add-card-btn");
     if (addBtn) {
@@ -2514,6 +2517,7 @@ async function loadListView() {
     });
 
     applySearchFilter();
+    applyClientCategoryFilter();
   } catch (err) {
     console.error("loadListView failed:", err);
     listView.innerHTML = `
@@ -2563,19 +2567,41 @@ function renderCategoryFilter() {
       } else {
         localStorage.removeItem('kanban-category');
       }
-      // 선택된 프로젝트가 새 카테고리에 없으면 초기화
-      if (currentProject && currentCategory) {
-        if (projectCategoryMap.get(currentProject) !== currentCategory) {
+
+      // 카테고리 내 프로젝트 목록
+      const inCategory = currentCategory
+        ? allProjects.filter(p => projectCategoryMap.get(p) === currentCategory)
+        : allProjects;
+
+      if (!currentCategory) {
+        // All 선택 시 프로젝트 필터 유지
+      } else if (inCategory.length === 1) {
+        // 단일 프로젝트 카테고리 → API 레벨 필터로 자동 선택
+        currentProject = inCategory[0];
+        localStorage.setItem('kanban-project', currentProject);
+      } else {
+        // 복수 프로젝트 카테고리 → 현재 프로젝트가 범위 밖이면 초기화
+        if (currentProject && !inCategory.includes(currentProject)) {
           currentProject = null;
           localStorage.removeItem('kanban-project');
         }
       }
+
       currentBoardVersion = null;
       currentBoardVersionEtag = null;
       renderCategoryFilter();
       renderProjectFilter(allProjects);
       refreshCurrentView();
     });
+  });
+}
+
+function applyClientCategoryFilter() {
+  if (!currentCategory || currentProject) return; // API 필터가 이미 적용됐으면 스킵
+  const selectors = '.card[data-project], .list-card[data-project], .chronicle-event[data-project]';
+  document.querySelectorAll<HTMLElement>(selectors).forEach(el => {
+    const cat = projectCategoryMap.get(el.dataset.project || '');
+    el.style.display = cat === currentCategory ? '' : 'none';
   });
 }
 
