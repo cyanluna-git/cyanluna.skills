@@ -32,13 +32,9 @@ BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summar
 
 ### `/kanban move <ID> <status>` — Move Task
 
-```bash
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d "{\"status\": \"$STATUS\"}"
-```
-
-The API enforces valid transitions. Invalid moves return 400 with allowed transitions.
+> **반드시 `shared.md` → Move Protocol 순서를 따를 것.**
+> Step 1(현재 status+level 확인) → Step 2(매트릭스 조회) → Step 3(이동 실행).
+> 400 시 응답의 `.allowed[0]`으로 1회 자기 교정, 2회 실패 시 사용자 알림.
 
 ### `/kanban edit <ID>` — Edit Task
 
