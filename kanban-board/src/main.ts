@@ -702,6 +702,9 @@ function isOlderThan3Days(dateStr: string): boolean {
 
 function sortTasks(tasks: Task[], status?: string): Task[] {
   if (currentSort === 'default') {
+    if (status === 'todo') {
+      return [...tasks].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+    }
     if (status === 'done') {
       return [...tasks].sort((a, b) => {
         const completedOrder = (b.completed_at || '').localeCompare(a.completed_at || '');
