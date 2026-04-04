@@ -4,10 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kanban Board</title>
-    <meta name="theme-color" content="#1e293b" />
+    <meta name="theme-color" content="#060e20" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Kanban Board" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -115,7 +118,7 @@
             <textarea id="add-description" rows="4" placeholder="Requirements in markdown"></textarea>
           </div>
           <div class="form-group">
-            <label for="add-tags">Tags <span style="color:#64748b;font-weight:400">(comma separated)</span></label>
+            <label for="add-tags">Tags <span style="color:var(--color-outline);font-weight:400">(comma separated)</span></label>
             <input type="text" id="add-tags" placeholder="e.g. feature, api, ui" />
           </div>
           <div class="form-group">
