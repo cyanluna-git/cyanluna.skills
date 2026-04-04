@@ -133,6 +133,10 @@ function readStoredMobileBoardColumns(): Set<string> {
 }
 
 let currentProject: string | null = localStorage.getItem('kanban-project');
+let currentCategory: string | null = localStorage.getItem('kanban-category');
+let allProjects: string[] = [];
+const projectCategoryMap = new Map<string, string>();
+let categoriesFetched = false;
 let isDragging = false;
 let isMobileViewport = MOBILE_MEDIA_QUERY.matches;
 let currentView: "board" | "list" | "chronicle" | "graph" = isView(localStorage.getItem(VIEW_STORAGE_KEY))
@@ -1796,6 +1800,7 @@ async function loadChronicleView() {
     const data = await fetchSummaryBoard("full");
 
     renderProjectFilter(data.projects);
+    renderCategoryFilter();
 
     const allTasks: Task[] = [];
     for (const col of COLUMNS) {
@@ -2260,6 +2265,12 @@ async function loadBoard() {
     ensureMobileBoardExpanded(data);
 
     renderProjectFilter(data.projects);
+    if (!categoriesFetched) {
+      categoriesFetched = true;
+      fetchProjectCategories().then(() => renderCategoryFilter());
+    } else {
+      renderCategoryFilter();
+    }
 
     board.innerHTML = COLUMNS.map((col) =>
       renderColumn(
@@ -2380,6 +2391,7 @@ async function loadListView() {
     const data = await fetchSummaryBoard("full");
 
     renderProjectFilter(data.projects);
+    renderCategoryFilter();
 
     // Flatten all tasks from all columns
     const allTasks: Task[] = [];
@@ -2512,16 +2524,77 @@ async function loadListView() {
   }
 }
 
+async function fetchProjectCategories(): Promise<void> {
+  try {
+    const res = await apiFetch('/api/projects');
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const p of (data.projects ?? [])) {
+      if (p.id && p.category) projectCategoryMap.set(p.id, p.category);
+    }
+  } catch {
+    // silently fail — category chips stay hidden
+  }
+}
+
+function renderCategoryFilter() {
+  const container = document.getElementById('category-filter');
+  if (!container) return;
+
+  const categories = [...new Set(projectCategoryMap.values())].sort();
+  if (categories.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const chips = [
+    `<button class="cat-chip${!currentCategory ? ' active' : ''}" data-cat="">All</button>`,
+    ...categories.map(cat =>
+      `<button class="cat-chip${currentCategory === cat ? ' active' : ''}" data-cat="${cat}">${cat}</button>`
+    ),
+  ].join('');
+  container.innerHTML = chips;
+
+  container.querySelectorAll<HTMLButtonElement>('.cat-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentCategory = btn.dataset.cat || null;
+      if (currentCategory) {
+        localStorage.setItem('kanban-category', currentCategory);
+      } else {
+        localStorage.removeItem('kanban-category');
+      }
+      // 선택된 프로젝트가 새 카테고리에 없으면 초기화
+      if (currentProject && currentCategory) {
+        if (projectCategoryMap.get(currentProject) !== currentCategory) {
+          currentProject = null;
+          localStorage.removeItem('kanban-project');
+        }
+      }
+      currentBoardVersion = null;
+      currentBoardVersionEtag = null;
+      renderCategoryFilter();
+      renderProjectFilter(allProjects);
+      refreshCurrentView();
+    });
+  });
+}
+
 function renderProjectFilter(projects: string[]) {
+  allProjects = projects;
+
+  const filtered = currentCategory
+    ? projects.filter(p => projectCategoryMap.get(p) === currentCategory)
+    : projects;
+
   const container = document.getElementById("project-filter")!;
-  if (projects.length <= 1) {
-    container.innerHTML = projects[0]
-      ? `<span class="project-label">${projects[0]}</span>`
+  if (filtered.length <= 1) {
+    container.innerHTML = filtered[0]
+      ? `<span class="project-label">${filtered[0]}</span>`
       : "";
     return;
   }
 
-  const options = projects
+  const options = filtered
     .map(
       (p) =>
         `<option value="${p}" ${p === currentProject ? "selected" : ""}>${p}</option>`
