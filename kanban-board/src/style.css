@@ -491,16 +491,14 @@ main#board.hidden {
   opacity: 0.4;
 }
 
-/* Column-specific card left borders */
-.column.plan_review .card {
-  border-left: 3px solid #f97316;
-}
-.column.impl_review .card {
-  border-left: 3px solid #8b5cf6;
-}
-.column.test .card {
-  border-left: 3px solid #14b8a6;
-}
+/* Column-specific card left glow bars */
+.column.todo .card        { box-shadow: inset 4px 0 0 var(--color-todo), 0 0 12px rgba(59, 191, 250, 0.08); }
+.column.plan .card        { box-shadow: inset 4px 0 0 var(--color-plan), 0 0 12px rgba(251, 191, 36, 0.08); }
+.column.plan_review .card { box-shadow: inset 4px 0 0 var(--color-plan-review), 0 0 12px rgba(251, 146, 60, 0.08); }
+.column.impl .card        { box-shadow: inset 4px 0 0 var(--color-impl), 0 0 12px rgba(244, 114, 182, 0.08); }
+.column.impl_review .card { box-shadow: inset 4px 0 0 var(--color-impl-review), 0 0 12px rgba(167, 139, 250, 0.08); }
+.column.test .card        { box-shadow: inset 4px 0 0 var(--color-test), 0 0 12px rgba(45, 212, 191, 0.08); }
+.column.done .card        { box-shadow: inset 4px 0 0 var(--color-done), 0 0 12px rgba(52, 211, 153, 0.08); }
 
 /* Drop indicator line for drag-and-drop reordering */
 .drop-indicator {
