@@ -70,6 +70,7 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d "{\"implementation_notes\": \"> **Builder** \`<MODEL_BUILDER>\` · $TIMESTAMP\n\n<NOTES_MARKDOWN>\", \"current_agent\": null}"
+# Optional: include "tokens": <ESTIMATED_TOKENS> in agent_log entry (estimated input+output tokens)
 ```
 
 Do NOT change the status — the orchestrator handles that.

@@ -70,4 +70,5 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"status\": \"plan_review\", \"current_agent\": null}"
+# Optional: include "tokens": <ESTIMATED_TOKENS> in agent_log entry (estimated input+output tokens)
 ```

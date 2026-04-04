@@ -118,6 +118,7 @@ This makes every card field self-documenting — you can see at a glance who wro
 
 ### agent_log
 Every entry must include `agent` (nickname), `model`, `message`, and `timestamp`.
+Optional: `"tokens"?: number` — estimated total tokens (input + output) consumed by the agent for this step.
 
 ```json
 [
@@ -125,22 +126,29 @@ Every entry must include `agent` (nickname), `model`, `message`, and `timestamp`
     "agent": "Planner",
     "model": "<MODEL_PLANNER>",
     "message": "Plan complete. 4 files to modify, 2 new components.",
+    "tokens": 12000,
     "timestamp": "2026-02-20T10:05:00.000Z"
   },
   {
     "agent": "Critic",
     "model": "<MODEL_CRITIC>",
     "message": "Plan approved. No major issues.",
+    "tokens": 8000,
     "timestamp": "2026-02-20T10:10:00.000Z"
   },
   {
     "agent": "Builder",
     "model": "<MODEL_BUILDER>",
     "message": "Implementation complete. All files modified per plan.",
+    "tokens": 25000,
     "timestamp": "2026-02-20T11:00:00.000Z"
   }
 ]
 ```
+
+**Token Estimation Guide**: Agents estimate their own usage based on context size + output length.
+Example: context ~8k input + ~2k output → `"tokens": 10000`
+If unknown or uncertain, omit the field — missing tokens count as 0 in stats.
 
 ## Appending to agent_log (orchestrator)
 
@@ -155,6 +163,7 @@ log.append({
   'agent': 'NICKNAME',
   'model': 'MODEL',
   'message': 'MESSAGE',
+  'tokens': TOKENS,  # optional: estimated input+output tokens, omit if unknown
   'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'
 })
 subprocess.run(['curl','-s',*auth_header,'-X','PATCH',f'{base_url}/api/task/{task_id}?project={project}','-H','Content-Type: application/json','-d',json.dumps({'agent_log':json.dumps(log)})], capture_output=True)
