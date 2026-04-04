@@ -627,14 +627,45 @@ main#board.hidden {
   margin-right: 8px;
 }
 
-/* Agent tag badge */
+/* Agent tag badge — pulses while active */
+@keyframes agent-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(125, 211, 252, 0.5); }
+  50%       { box-shadow: 0 0 0 4px rgba(125, 211, 252, 0); }
+}
 .badge.agent-tag {
   background: #1e3a5f;
   color: #7dd3fc;
   text-transform: none;
   font-size: 0.55rem;
   padding: 1px 5px;
+  animation: agent-pulse 2s ease-in-out infinite;
 }
+
+/* Review cycle warning badge */
+.badge.cycle-warning {
+  background: #7c2d12;
+  color: #fb923c;
+}
+
+/* Priority group headers inside REQUIREMENTS column */
+.priority-group-header {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 8px 3px;
+  margin-top: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.priority-group-header:first-child { margin-top: 0; }
+.priority-group-header span { opacity: 0.55; font-weight: 400; font-size: 0.55rem; }
+.priority-group-high   { color: #fca5a5; }
+.priority-group-medium { color: #fde68a; }
+.priority-group-low    { color: #93c5fd; }
+.priority-group-other  { color: #64748b; }
 
 /* Tags */
 .tag {

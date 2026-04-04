@@ -866,6 +866,12 @@ function renderCard(task: Task): string {
     ? `<span class="badge agent-tag">${task.current_agent}</span>`
     : "";
 
+  // Review cycle warning (> 2 combined review cycles = struggling task)
+  const reviewCycles = (task.plan_review_count || 0) + (task.impl_review_count || 0);
+  const cycleBadge = reviewCycles > 2
+    ? `<span class="badge cycle-warning" title="${reviewCycles} review cycles">↻${reviewCycles}</span>`
+    : '';
+
   // Review badge (impl_review)
   const reviewComments = task.last_review_status ? [] : parseJsonArray(task.review_comments);
   const lastReviewStatus = task.last_review_status || (reviewComments.length > 0 ? reviewComments[reviewComments.length - 1]?.status : null);
@@ -922,6 +928,7 @@ function renderCard(task: Task): string {
         ${priorityBadge}
         ${statusBadge}
         ${agentBadge}
+        ${cycleBadge}
         <button class="card-copy-btn" data-copy="#${task.id} ${task.title}" title="Copy to clipboard">⎘</button>
       </div>
       <div class="card-title">${task.title}</div>
@@ -946,18 +953,41 @@ function renderColumn(
   totalCount: number = tasks.length
 ): string {
   const expanded = isMobileColumnExpanded(key);
-  const cardsHtml = sortTasks(tasks, key).map(renderCard).join("");
+  const sorted = sortTasks(tasks, key);
+  let cardsHtml: string;
+  if (key === 'todo' && sorted.length > 0) {
+    const PRIORITY_ORDER = ['high', 'medium', 'low', ''];
+    const groups = new Map<string, Task[]>();
+    PRIORITY_ORDER.forEach(p => groups.set(p, []));
+    sorted.forEach(t => {
+      const p = (t.priority || '').toLowerCase();
+      const bucket = groups.has(p) ? p : '';
+      groups.get(bucket)!.push(t);
+    });
+    cardsHtml = PRIORITY_ORDER
+      .filter(p => (groups.get(p)?.length ?? 0) > 0)
+      .map(p => {
+        const group = groups.get(p)!;
+        const label = p ? p.toUpperCase() : 'OTHER';
+        return `<div class="priority-group-header priority-group-${p || 'other'}">${label} <span>${group.length}</span></div>`
+          + group.map(renderCard).join('');
+      })
+      .join('');
+  } else {
+    cardsHtml = sorted.map(renderCard).join('');
+  }
   const addBtn = key === "todo"
     ? `<button class="add-card-btn" id="add-card-btn" title="Add card">+</button>`
     : "";
   const countLabel = totalCount !== tasks.length ? `${tasks.length}/${totalCount}` : `${totalCount}`;
+  const countTitle = totalCount !== tasks.length ? ` title="Showing ${tasks.length} of ${totalCount}"` : '';
   return `
     <div class="column ${key}" data-column="${key}" data-mobile-expanded="${expanded}" data-total-count="${totalCount}">
       <div class="column-header">
         <button class="column-toggle-btn" type="button" data-column-toggle="${key}" aria-expanded="${expanded}">
           <span class="column-toggle-label">${icon} ${label}</span>
           <span class="column-toggle-meta">
-            <span class="count">${countLabel}</span>
+            <span class="count"${countTitle}>${countLabel}</span>
             <span class="column-toggle-icon" aria-hidden="true">${expanded ? "−" : "+"}</span>
           </span>
         </button>
