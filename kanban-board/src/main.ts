@@ -81,8 +81,8 @@ const AUTH_STORAGE_KEY = "kanban-auth-token";
 const VIEW_STORAGE_KEY = "kanban-current-view";
 const MOBILE_BOARD_COLUMNS_KEY = "kanban-mobile-board-columns";
 const BOARD_VERSION_POLL_MS = 30000;
-const BOARD_TODO_LIMIT = 10;
-const BOARD_DONE_LIMIT = 10;
+const BOARD_TODO_LIMIT = 50;
+const BOARD_DONE_LIMIT = 50;
 const SUMMARY_CACHE_PREFIX = "kanban-summary-cache";
 const SUMMARY_TTL_MS: Record<SummaryMode, number> = {
   board: 30_000,
@@ -112,8 +112,8 @@ function registerServiceWorker() {
   });
 }
 
-function isView(value: string | null): value is "board" | "list" | "chronicle" | "graph" {
-  return value === "board" || value === "list" || value === "chronicle" || value === "graph";
+function isView(value: string | null): value is "board" | "list" | "chronicle" {
+  return value === "board" || value === "list" || value === "chronicle";
 }
 
 function isColumnKey(value: string): value is typeof COLUMNS[number]["key"] {
@@ -140,8 +140,8 @@ const projectNameMap = new Map<string, string>();
 let categoriesFetched = false;
 let isDragging = false;
 let isMobileViewport = MOBILE_MEDIA_QUERY.matches;
-let currentView: "board" | "list" | "chronicle" | "graph" = isView(localStorage.getItem(VIEW_STORAGE_KEY))
-  ? (localStorage.getItem(VIEW_STORAGE_KEY) as "board" | "list" | "chronicle" | "graph")
+let currentView: "board" | "list" | "chronicle" = isView(localStorage.getItem(VIEW_STORAGE_KEY))
+  ? (localStorage.getItem(VIEW_STORAGE_KEY) as "board" | "list" | "chronicle")
   : (isMobileViewport ? "list" : "board");
 let currentSearch: string = '';
 let currentSort: string = localStorage.getItem('kanban-sort') || 'default';
@@ -158,9 +158,6 @@ let currentBoardVersionEtag: string | null = null;
 const summaryBoardCache = new Map<string, Board>();
 const summaryBoardEtagCache = new Map<string, string>();
 const summaryRevalidation = new Map<string, Promise<void>>();
-let graphResizeObserver: ResizeObserver | null = null;
-interface GraphInstanceAPI { pauseAnimation: () => void; }
-let graphInstance: GraphInstanceAPI | null = null;
 let sidebarObserver: IntersectionObserver | null = null;
 const VALID_STAGES = new Set(['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']);
 const hiddenStages = new Set<string>(
@@ -2152,404 +2149,6 @@ async function loadChronicleView() {
   }
 }
 
-async function loadGraphView() {
-  const el = document.getElementById("graph-view")!;
-  // Set exact height from current viewport position
-  const top = el.getBoundingClientRect().top;
-  el.style.height = `${window.innerHeight - top}px`;
-
-  el.innerHTML = `
-    <div class="graph-placeholder">
-      <div class="graph-spinner"></div>
-      <p>Loading graph&hellip;</p>
-    </div>`;
-
-  // Cleanup previous graph and ResizeObserver
-  if (graphInstance) {
-    graphInstance.pauseAnimation();
-    graphInstance = null;
-  }
-  if (graphResizeObserver) {
-    graphResizeObserver.disconnect();
-    graphResizeObserver = null;
-  }
-
-  // Status → border color (ring around node)
-  const STATUS_COLORS: Record<string, string> = {
-    todo: "#475569",
-    plan: "#3b82f6",
-    impl: "#8b5cf6",
-    impl_review: "#6366f1",
-    plan_review: "#a855f7",
-    test: "#f59e0b",
-    done: "#22c55e",
-  };
-  // Tech/topic tag → fill color (Obsidian-style topic clustering)
-  const TOPIC_COLORS: Record<string, string> = {
-    react:           "#61dafb",
-    nextjs:          "#ffffff",
-    typescript:      "#3178c6",
-    tailwind:        "#38bdf8",
-    "react-query":   "#ff4154",
-    vite:            "#a855f7",
-    shadcn:          "#f8fafc",
-    zustand:         "#764abc",
-    hotwire:         "#cc0000",
-    css:             "#264de4",
-    fastapi:         "#009688",
-    rails:           "#cc0000",
-    python:          "#3572a5",
-    nodejs:          "#68a063",
-    ruby:            "#cc342d",
-    postgresql:      "#336791",
-    sqlite:          "#003b57",
-    neon:            "#00e599",
-    supabase:        "#3ecf8e",
-    timescaledb:     "#fdb515",
-    influxdb:        "#22adf6",
-    drizzle:         "#c5f74f",
-    prisma:          "#5a67d8",
-    sqlalchemy:      "#d71f00",
-    oracle:          "#f80000",
-    auth:            "#f59e0b",
-    "auth.js":       "#f59e0b",
-    oauth:           "#f97316",
-    docker:          "#2496ed",
-    "docker-compose":"#2496ed",
-    vercel:          "#ffffff",
-    deploy:          "#10b981",
-    kamal:           "#10b981",
-    gcp:             "#4285f4",
-    azure:           "#0078d4",
-    "ci-cd":         "#f05032",
-    mobile:          "#a78bfa",
-    capacitor:       "#119eff",
-    pwa:             "#5a0fc8",
-    api:             "#64748b",
-    modbus:          "#e67e22",
-    realtime:        "#ef4444",
-    webhook:         "#6366f1",
-    ai:              "#f59e0b",
-    testing:         "#22c55e",
-    storage:         "#0ea5e9",
-    s3:              "#ff9900",
-    r2:              "#f38020",
-    pdf:             "#e53e3e",
-    excel:           "#217346",
-    performance:     "#f97316",
-    cache:           "#8b5cf6",
-    migration:       "#ec4899",
-    maps:            "#34a853",
-    gps:             "#34a853",
-    visualization:   "#06b6d4",
-    dashboard:       "#06b6d4",
-    canvas:          "#f59e0b",
-    graph:           "#06b6d4",
-    chart:           "#06b6d4",
-    modal:           "#94a3b8",
-    refactor:        "#a3a3a3",
-    kanban:          "#818cf8",
-    obsidian:        "#7c3aed",
-    "cycling-data":  "#10b981",
-    euv:             "#e11d48",
-    plc:             "#e11d48",
-    schema:          "#64748b",
-  };
-  // Priority weight for dominant topic selection
-  const TOPIC_PRIORITY_ORDER = [
-    "react","nextjs","typescript","fastapi","rails","python","nodejs",
-    "postgresql","sqlite","neon","supabase","timescaledb","influxdb",
-    "drizzle","prisma","sqlalchemy","oracle",
-    "auth","auth.js","oauth",
-    "docker","docker-compose","vercel","deploy","kamal","gcp","azure","ci-cd",
-    "mobile","capacitor","pwa",
-    "api","modbus","realtime","webhook",
-    "ai","testing","storage","s3","r2","pdf","excel",
-    "performance","cache","migration","maps","gps",
-    "visualization","dashboard","canvas","graph","chart","modal",
-    "refactor","kanban","obsidian","cycling-data","euv","plc","schema",
-  ];
-  function dominantTopic(tags: string[]): string | null {
-    const lower = tags.map((t) => t.toLowerCase());
-    for (const tp of TOPIC_PRIORITY_ORDER) {
-      if (lower.includes(tp)) return tp;
-    }
-    // Fallback: first tag that has a color mapping
-    return lower.find((t) => t in TOPIC_COLORS) ?? null;
-  }
-  const LEVEL_SIZES: Record<number, number> = { 1: 9, 2: 16, 3: 25 };
-  const STATUS_RING: Record<string, string> = {
-    todo:        "#475569",
-    plan:        "#3b82f6",
-    impl:        "#8b5cf6",
-    impl_review: "#6366f1",
-    plan_review: "#a855f7",
-    test:        "#f59e0b",
-    done:        "#22c55e",
-  };
-
-  try {
-    const [{ default: ForceGraph }, data] = await Promise.all([
-      import("force-graph"),
-      fetchSummaryBoard("full"),
-    ]);
-
-    // Collect all tasks across columns
-    const allTasks: (Task & { _status: string })[] = [];
-    for (const col of COLUMNS) {
-      const tasks = data[col.key as keyof Omit<Board, "projects" | "counts">] as Task[];
-      for (const t of tasks) {
-        allTasks.push({ ...t, _status: col.key });
-      }
-    }
-
-    // 300+ node guard: warn and exclude done nodes
-    // Also apply hideOldDone: exclude done nodes older than 3 days
-    let tasksForGraph = allTasks;
-    let warningHtml = "";
-    if (allTasks.length > 300) {
-      tasksForGraph = allTasks.filter((t) => t._status !== "done");
-      warningHtml = `<div style="position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:10;background:#1e293b;color:#f59e0b;padding:4px 12px;border-radius:6px;font-size:0.8rem;border:1px solid #f59e0b40">${allTasks.length} nodes — done tasks hidden for performance</div>`;
-    } else if (hideOldDone) {
-      tasksForGraph = allTasks.filter((t) => !(t._status === "done" && isOlderThan3Days(t.completed_at || "")));
-    }
-
-    // Build nodes
-    interface GraphNode {
-      id: number;
-      title: string;
-      status: string;
-      level: number;
-      tags: string[];
-      priority: string;
-      project: string;
-      x?: number;
-      y?: number;
-    }
-    interface GraphLink {
-      source: number;
-      target: number;
-      tag: string;
-      sharedCount: number;
-    }
-
-    const q = currentSearch.toLowerCase().replace(/^#/, "");
-
-    const nodes: GraphNode[] = tasksForGraph.map((t) => ({
-      id: t.id,
-      title: `#${t.id} ${t.title}`,
-      status: t._status,
-      level: t.level ?? 1,
-      tags: parseTags(t.tags),
-      priority: t.priority || "medium",
-      project: t.project,
-    }));
-
-    // Build edges: shared-tags — deduplicated pairs + count shared tags per pair
-    const tagIndex = new Map<string, number[]>();
-    for (const node of nodes) {
-      for (const tag of node.tags) {
-        const lowerTag = tag.toLowerCase();
-        if (!tagIndex.has(lowerTag)) tagIndex.set(lowerTag, []);
-        tagIndex.get(lowerTag)!.push(node.id);
-      }
-    }
-
-    // Count how many tags each pair shares
-    const pairTagCount = new Map<string, number>();
-    for (const [, ids] of tagIndex) {
-      for (let i = 0; i < ids.length; i++) {
-        for (let j = i + 1; j < ids.length; j++) {
-          const a = Math.min(ids[i], ids[j]);
-          const b = Math.max(ids[i], ids[j]);
-          const key = `${a}-${b}`;
-          pairTagCount.set(key, (pairTagCount.get(key) || 0) + 1);
-        }
-      }
-    }
-
-    const linkSet = new Set<string>();
-    const links: GraphLink[] = [];
-    for (const [tag, ids] of tagIndex) {
-      for (let i = 0; i < ids.length; i++) {
-        for (let j = i + 1; j < ids.length; j++) {
-          const a = Math.min(ids[i], ids[j]);
-          const b = Math.max(ids[i], ids[j]);
-          const key = `${a}-${b}`;
-          if (!linkSet.has(key)) {
-            linkSet.add(key);
-            links.push({ source: a, target: b, tag, sharedCount: pairTagCount.get(key) || 1 });
-          }
-        }
-      }
-    }
-
-    // Clear and render — fix overflow so canvas stays in bounds
-    el.innerHTML = warningHtml;
-    el.style.position = "relative";
-    el.style.padding = "0";
-    el.style.overflow = "hidden";
-
-    const graphContainer = document.createElement("div");
-    graphContainer.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
-    el.appendChild(graphContainer);
-
-    // Tooltip element
-    const tooltip = document.createElement("div");
-    tooltip.className = "graph-tooltip";
-    el.appendChild(tooltip);
-
-    // Track mouse position for tooltip placement
-    el.addEventListener("mousemove", (e) => {
-      const rect = el.getBoundingClientRect();
-      tooltip.style.left = `${e.clientX - rect.left + 12}px`;
-      tooltip.style.top = `${e.clientY - rect.top + 12}px`;
-    });
-
-    const graph = ForceGraph()(graphContainer)
-      .backgroundColor("#0f172a")
-      .nodeId("id")
-      .nodeLabel(() => "")
-      .nodeVal((node: GraphNode) => LEVEL_SIZES[node.level] || LEVEL_SIZES[1])
-      .nodeCanvasObject((node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-        const r = Math.sqrt(LEVEL_SIZES[node.level] || LEVEL_SIZES[1]) * 2;
-        const x = node.x ?? 0;
-        const y = node.y ?? 0;
-
-        // Determine opacity: search dim > done dim
-        let alpha = 1;
-        if (q) {
-          const match = node.title.toLowerCase().includes(q) ||
-            node.tags.some((t) => t.toLowerCase().includes(q));
-          alpha = match ? 1 : 0.15;
-        } else if (node.status === "done") {
-          alpha = 0.35;
-        }
-        ctx.globalAlpha = alpha;
-
-        // Fill: topic color (Obsidian-style clustering) or fallback grey
-        const topic = dominantTopic(node.tags);
-        const fillColor = topic ? (TOPIC_COLORS[topic] ?? "#334155") : "#334155";
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, 2 * Math.PI);
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-
-        // Status ring (outer ring shows pipeline position)
-        const statusColor = STATUS_RING[node.status] ?? "#475569";
-        ctx.beginPath();
-        ctx.arc(x, y, r + 1.5 / globalScale, 0, 2 * Math.PI);
-        ctx.strokeStyle = statusColor;
-        ctx.lineWidth = 1.5 / globalScale;
-        ctx.stroke();
-
-        // Topic label — centered below node, always visible
-        const labelText = topic ?? node.tags[0] ?? "";
-        if (labelText) {
-          const topicFontSize = Math.max(2, 10 / globalScale);
-          ctx.font = `600 ${topicFontSize}px sans-serif`;
-          ctx.fillStyle = alpha < 0.5
-            ? "rgba(148,163,184,0.15)"
-            : (topic ? (TOPIC_COLORS[topic] ?? "#94a3b8") : "#94a3b8");
-          ctx.textAlign = "center";
-          ctx.textBaseline = "top";
-          ctx.fillText(labelText, x, y + r + 2 / globalScale);
-        }
-
-        // Title — only when zoomed in (Obsidian style: detail on demand)
-        if (globalScale > 2.5) {
-          const titleText = node.title.replace(/^#\d+\s*/, "").slice(0, 30);
-          const titleFontSize = 9 / globalScale;
-          ctx.font = `${titleFontSize}px sans-serif`;
-          ctx.fillStyle = alpha < 0.5 ? "rgba(148,163,184,0.2)" : "#64748b";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "bottom";
-          ctx.fillText(titleText, x, y - r - 2 / globalScale);
-        }
-
-        // Reset alpha
-        ctx.globalAlpha = 1;
-      })
-      .nodePointerAreaPaint((node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
-        const r = Math.sqrt(LEVEL_SIZES[node.level] || LEVEL_SIZES[1]) * 2 + 2;
-        ctx.beginPath();
-        ctx.arc(node.x ?? 0, node.y ?? 0, r, 0, 2 * Math.PI);
-        ctx.fillStyle = color;
-        ctx.fill();
-      })
-      .onNodeClick((node: GraphNode) => {
-        showTaskDetail(node.id, node.project);
-      })
-      .onNodeHover((node: GraphNode | null) => {
-        graphContainer.style.cursor = node ? "pointer" : "default";
-        if (!node) {
-          tooltip.style.display = "none";
-          return;
-        }
-        const topicTag = dominantTopic(node.tags);
-        const topicColor = topicTag ? (TOPIC_COLORS[topicTag] ?? null) : null;
-        const topicBadge = topicTag
-          ? `<span style="background:${topicColor};color:#0f172a;padding:1px 7px;border-radius:4px;font-weight:600">${topicTag}</span>`
-          : "";
-        const otherTags = node.tags.filter((t) => t.toLowerCase() !== topicTag).slice(0, 3);
-        const tagsHtml = otherTags.length
-          ? `<div class="graph-tooltip-tags">${otherTags.map((t) => `<span>${t}</span>`).join("")}</div>`
-          : "";
-        tooltip.innerHTML = `
-          <div class="graph-tooltip-title">${node.title}</div>
-          <div class="graph-tooltip-meta" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            ${topicBadge}
-            <span>${node.status} &middot; ${node.priority} &middot; L${node.level}</span>
-          </div>
-          ${tagsHtml}`;
-        tooltip.style.display = "block";
-      })
-      .linkColor((link: GraphLink) => TOPIC_COLORS[link.tag.toLowerCase()] ?? "#334155")
-      .linkWidth((link: GraphLink) => Math.min(1.5 + (link.sharedCount - 1) * 0.8, 4))
-      .d3AlphaDecay(0.02)
-      .d3VelocityDecay(0.3)
-      .warmupTicks(100)
-      .cooldownTime(5000)
-      .width(el.offsetWidth || window.innerWidth)
-      .height(window.innerHeight - el.getBoundingClientRect().top)
-      .graphData({ nodes, links });
-
-    graphInstance = graph as unknown as GraphInstanceAPI;
-
-    // Topic legend — show only topics actually present in this graph
-    const presentTopics = new Set(nodes.flatMap((n) => n.tags.map((t) => t.toLowerCase())));
-    const legendTopics = TOPIC_PRIORITY_ORDER
-      .filter((t) => presentTopics.has(t) && t in TOPIC_COLORS)
-      .slice(0, 16);
-    if (legendTopics.length > 0) {
-      const legend = document.createElement("div");
-      legend.className = "graph-legend";
-      legend.innerHTML = legendTopics
-        .map((t) => `<div class="graph-legend-item"><span style="background:${TOPIC_COLORS[t]}"></span>${t}</div>`)
-        .join("");
-      el.appendChild(legend);
-    }
-
-    // ResizeObserver for responsive canvas sizing
-    graphResizeObserver = new ResizeObserver(() => {
-      const w = el.offsetWidth;
-      const h = window.innerHeight - el.getBoundingClientRect().top;
-      if (w > 0 && h > 0) {
-        el.style.height = `${h}px`;
-        graph.width(w).height(h);
-      }
-    });
-    graphResizeObserver.observe(document.documentElement);
-
-  } catch (err) {
-    console.error("loadGraphView failed:", err);
-    el.innerHTML = `
-      <div class="graph-placeholder">
-        <p style="color:#ef4444;font-size:0.9rem">Failed to load graph</p>
-      </div>`;
-  }
-}
-
 async function loadBoard() {
   const board = document.getElementById("board")!;
   try {
@@ -3074,35 +2673,20 @@ async function loadProjectInfo() {
   }
 }
 
-function switchView(view: "board" | "list" | "chronicle" | "graph") {
+function switchView(view: "board" | "list" | "chronicle") {
   currentView = view;
   localStorage.setItem(VIEW_STORAGE_KEY, currentView);
   const boardEl = document.getElementById("board")!;
   const listEl = document.getElementById("list-view")!;
   const chronicleEl = document.getElementById("chronicle-view")!;
-  const graphEl = document.getElementById("graph-view")!;
-
-  // Cleanup graph when switching away
-  if (view !== "graph") {
-    if (graphResizeObserver) {
-      graphResizeObserver.disconnect();
-      graphResizeObserver = null;
-    }
-    if (graphInstance) {
-      graphInstance.pauseAnimation();
-      graphInstance = null;
-    }
-  }
 
   // Hide all
   boardEl.classList.add("hidden");
   listEl.classList.add("hidden");
   chronicleEl.classList.add("hidden");
-  graphEl.classList.add("hidden");
   document.getElementById("tab-board")!.classList.remove("active");
   document.getElementById("tab-list")!.classList.remove("active");
   document.getElementById("tab-chronicle")!.classList.remove("active");
-  document.getElementById("tab-graph")!.classList.remove("active");
 
   if (view === "board") {
     boardEl.classList.remove("hidden");
@@ -3112,22 +2696,17 @@ function switchView(view: "board" | "list" | "chronicle" | "graph") {
     listEl.classList.remove("hidden");
     document.getElementById("tab-list")!.classList.add("active");
     loadListView();
-  } else if (view === "chronicle") {
+  } else {
     chronicleEl.classList.remove("hidden");
     document.getElementById("tab-chronicle")!.classList.add("active");
     loadChronicleView();
-  } else {
-    graphEl.classList.remove("hidden");
-    document.getElementById("tab-graph")!.classList.add("active");
-    loadGraphView();
   }
 }
 
 function refreshCurrentView() {
   if (currentView === "board") loadBoard();
   else if (currentView === "list") loadListView();
-  else if (currentView === "chronicle") loadChronicleView();
-  else loadGraphView();
+  else loadChronicleView();
 }
 
 // Restore persisted UI state
@@ -3186,7 +2765,6 @@ document.getElementById("auth-form")!.addEventListener("submit", async (e) => {
 document.getElementById("tab-board")!.addEventListener("click", () => switchView("board"));
 document.getElementById("tab-list")!.addEventListener("click", () => switchView("list"));
 document.getElementById("tab-chronicle")!.addEventListener("click", () => switchView("chronicle"));
-document.getElementById("tab-graph")!.addEventListener("click", () => switchView("graph"));
 
 document.getElementById("toolbar-mobile-toggle")!.addEventListener("click", () => {
   mobileFiltersOpen = !mobileFiltersOpen;
@@ -3233,10 +2811,6 @@ document.getElementById("search-input")!.addEventListener("input", (e) => {
     loadBoard();
     return;
   }
-  if (currentView === "graph") {
-    loadGraphView();
-    return;
-  }
   applySearchFilter();
 });
 
@@ -3252,10 +2826,6 @@ document.getElementById("hide-done-btn")!.addEventListener("click", () => {
   hideOldDone = !hideOldDone;
   localStorage.setItem('kanban-hide-old', String(hideOldDone));
   document.getElementById("hide-done-btn")!.classList.toggle("active", hideOldDone);
-  if (currentView === "graph") {
-    loadGraphView();
-    return;
-  }
   applySearchFilter();
 });
 
