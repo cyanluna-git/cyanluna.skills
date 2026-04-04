@@ -709,7 +709,7 @@ function sortTasks(tasks: Task[], status?: string): Task[] {
       return [...tasks].sort((a, b) => {
         const completedOrder = (b.completed_at || '').localeCompare(a.completed_at || '');
         if (completedOrder !== 0) return completedOrder;
-        return a.rank - b.rank || a.id - b.id;
+        return b.id - a.id;
       });
     }
     return [...tasks].sort((a, b) => b.rank - a.rank || b.id - a.id);
