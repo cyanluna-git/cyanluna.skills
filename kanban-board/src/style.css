@@ -139,7 +139,7 @@ aside.sidebar[data-collapsed] {
   flex-direction: column;
   gap: 2px;
   padding: 8px;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   overflow-y: auto;
 }
 
@@ -260,6 +260,45 @@ aside.sidebar[data-collapsed] .sidebar-eye-btn { display: none; }
   text-transform: uppercase;
 }
 .sidebar-show-all-btn:hover { background: var(--color-surface-card); }
+
+/* Sidebar project section */
+.sidebar-section-divider {
+  height: 1px;
+  background: rgba(64, 72, 93, 0.15);
+  margin: 8px 0;
+}
+.sidebar-projects {
+  padding: 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  flex-shrink: 1;
+  min-height: 0;
+}
+.sidebar-section-label {
+  padding: 4px 12px 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+  font-family: var(--font-display);
+}
+.sidebar-project-item {
+  /* inherits .sidebar-item styles */
+}
+.sidebar-project-item.active {
+  background: var(--color-surface-card);
+  color: var(--color-on-surface-bright);
+  font-weight: 600;
+}
+aside.sidebar[data-collapsed] .sidebar-projects {
+  display: none;
+}
+aside.sidebar[data-collapsed] .sidebar-section-divider {
+  display: none;
+}
 
 /* Hidden count in header */
 #hidden-stage-count {
@@ -956,6 +995,35 @@ main#board.hidden {
 .priority-group-medium { color: var(--color-priority-medium); }
 .priority-group-low    { color: var(--color-priority-low); }
 .priority-group-other  { color: var(--color-outline); }
+
+/* Project group header */
+.project-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 3px;
+  margin: 8px 0 4px;
+  border-top: 1px solid rgba(64, 72, 93, 0.15);
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+}
+.project-group-header:first-child {
+  margin-top: 0;
+  border-top: none;
+}
+.project-group-count {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--color-surface-card-high);
+  color: var(--color-on-surface-variant);
+  margin-left: auto;
+}
 
 /* Tags */
 .tag {

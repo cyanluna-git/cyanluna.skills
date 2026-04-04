@@ -136,6 +136,7 @@ let currentProject: string | null = localStorage.getItem('kanban-project');
 let currentCategory: string | null = localStorage.getItem('kanban-category');
 let allProjects: string[] = [];
 const projectCategoryMap = new Map<string, string>();
+const projectNameMap = new Map<string, string>();
 let categoriesFetched = false;
 let isDragging = false;
 let isMobileViewport = MOBILE_MEDIA_QUERY.matches;
@@ -166,6 +167,10 @@ const hiddenStages = new Set<string>(
   (JSON.parse(localStorage.getItem('kanban-hidden-stages') || '[]') as string[])
     .filter(s => VALID_STAGES.has(s))
 );
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 function debounce<A extends string[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>;
@@ -329,6 +334,52 @@ function bindShowAllButton(): void {
   }
 }
 
+function renderSidebarProjects(): void {
+  const container = document.querySelector<HTMLElement>('.sidebar-projects');
+  if (!container) return;
+
+  const projects = allProjects;
+  const filtered = currentCategory
+    ? projects.filter(p => projectCategoryMap.get(p) === currentCategory)
+    : projects;
+
+  const items = filtered.map(p => {
+    const isActive = currentProject === p;
+    const displayName = escapeHtml(projectNameMap.get(p) || p);
+    return `<div role="button" tabindex="0" class="sidebar-item sidebar-project-item${isActive ? ' active' : ''}" data-project-id="${escapeHtml(p)}">
+      <span class="sidebar-icon">📁</span>
+      <span class="sidebar-label">${displayName}</span>
+    </div>`;
+  });
+
+  const allActive = currentProject === null;
+  container.innerHTML = `<div class="sidebar-section-label">Projects</div>`
+    + `<div role="button" tabindex="0" class="sidebar-item sidebar-project-item${allActive ? ' active' : ''}" data-project-id="__all__">
+      <span class="sidebar-icon">\u{1F310}</span>
+      <span class="sidebar-label">All Projects</span>
+    </div>`
+    + items.join('');
+
+  container.querySelectorAll<HTMLElement>('.sidebar-project-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const pid = item.dataset.projectId!;
+      currentProject = pid === '__all__' ? null : pid;
+      if (currentProject) {
+        localStorage.setItem('kanban-project', currentProject);
+      } else {
+        localStorage.removeItem('kanban-project');
+      }
+      currentBoardVersion = null;
+      currentBoardVersionEtag = null;
+      renderProjectFilter(allProjects);
+      refreshCurrentView();
+    });
+    item.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); }
+    });
+  });
+}
+
 function initSidebar(): void {
   const sidebar = document.querySelector<HTMLElement>('aside.sidebar');
   if (!sidebar) return;
@@ -340,6 +391,7 @@ function initSidebar(): void {
   bindShowAllButton();
   bindCollapseToggle(sidebar);
   initIntersectionObserver();
+  renderSidebarProjects();
 }
 
 function setAuthMessage(message: string, tone: "default" | "error" | "success" = "default") {
@@ -1126,6 +1178,30 @@ function renderCard(task: Task, suppressStatus = false): string {
   `;
 }
 
+function wrapWithProjectGroups(tasks: Task[], renderFn: (t: Task) => string): string {
+  if (currentProject !== null) {
+    return tasks.map(renderFn).join('');
+  }
+  const projectOrder: string[] = [];
+  const groups = new Map<string, Task[]>();
+  tasks.forEach(t => {
+    if (!groups.has(t.project)) {
+      groups.set(t.project, []);
+      projectOrder.push(t.project);
+    }
+    groups.get(t.project)!.push(t);
+  });
+  if (projectOrder.length <= 1) {
+    return tasks.map(renderFn).join('');
+  }
+  return projectOrder.map(pid => {
+    const group = groups.get(pid)!;
+    const displayName = escapeHtml(projectNameMap.get(pid) ?? pid);
+    return `<div class="project-group-header" data-project="${escapeHtml(pid)}"><span class="project-group-name">${displayName}</span><span class="project-group-count">${group.length}</span></div>`
+      + group.map(renderFn).join('');
+  }).join('');
+}
+
 function renderColumn(
   key: string,
   label: string,
@@ -1151,11 +1227,11 @@ function renderColumn(
         const group = groups.get(p)!;
         const label = p ? p.toUpperCase() : 'OTHER';
         return `<div class="priority-group-header priority-group-${p || 'other'}">${label} <span>${group.length}</span></div>`
-          + group.map(t => renderCard(t, true)).join('');
+          + wrapWithProjectGroups(group, t => renderCard(t, true));
       })
       .join('');
   } else {
-    cardsHtml = sorted.map(t => renderCard(t, true)).join('');
+    cardsHtml = wrapWithProjectGroups(sorted, t => renderCard(t, true));
   }
   const addBtn = key === "todo"
     ? `<button class="add-card-btn" id="add-card-btn" title="Add card">+</button>`
@@ -2483,7 +2559,7 @@ async function loadBoard() {
     renderProjectFilter(data.projects);
     if (!categoriesFetched) {
       categoriesFetched = true;
-      fetchProjectCategories().then(() => renderCategoryFilter());
+      fetchProjectCategories().then(() => { renderCategoryFilter(); renderSidebarProjects(); });
     } else {
       renderCategoryFilter();
     }
@@ -2752,6 +2828,7 @@ async function fetchProjectCategories(): Promise<void> {
     const data = await res.json();
     for (const p of (data.projects ?? [])) {
       if (p.id && p.category) projectCategoryMap.set(p.id, p.category);
+      if (p.id) projectNameMap.set(p.id, p.name || p.id);
     }
   } catch {
     // silently fail — category chips stay hidden
@@ -2860,6 +2937,7 @@ function renderProjectFilter(projects: string[]) {
     }
     currentBoardVersion = null;
     currentBoardVersionEtag = null;
+    renderSidebarProjects();
     refreshCurrentView();
   });
 }
