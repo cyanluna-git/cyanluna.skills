@@ -160,6 +160,91 @@ const summaryRevalidation = new Map<string, Promise<void>>();
 let graphResizeObserver: ResizeObserver | null = null;
 interface GraphInstanceAPI { pauseAnimation: () => void; }
 let graphInstance: GraphInstanceAPI | null = null;
+let sidebarObserver: IntersectionObserver | null = null;
+
+function debounce<A extends string[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
+  let timer: ReturnType<typeof setTimeout>;
+  return (...args: A) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+function setActiveSidebarItem(stage: string): void {
+  document.querySelectorAll<HTMLElement>('.sidebar-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.stage === stage);
+  });
+}
+
+function bindSidebarItems(sidebar: HTMLElement): void {
+  sidebar.querySelectorAll<HTMLButtonElement>('.sidebar-item[data-stage]').forEach(btn => {
+    const fresh = btn.cloneNode(true) as HTMLButtonElement;
+    btn.parentNode?.replaceChild(fresh, btn);
+    fresh.addEventListener('click', () => {
+      const stage = fresh.dataset.stage!;
+      setActiveSidebarItem(stage);
+      document.querySelector<HTMLElement>(`.column[data-column="${stage}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+    });
+  });
+}
+
+function bindCollapseToggle(sidebar: HTMLElement): void {
+  const btn = document.getElementById('sidebar-collapse-btn');
+  if (!btn) return;
+  const fresh = btn.cloneNode(true) as HTMLButtonElement;
+  btn.parentNode?.replaceChild(fresh, btn);
+  fresh.addEventListener('click', () => {
+    const collapsed = sidebar.toggleAttribute('data-collapsed');
+    localStorage.setItem('kanban-sidebar-collapsed', String(collapsed));
+    fresh.textContent = collapsed ? '›' : '‹';
+  });
+  fresh.textContent = sidebar.hasAttribute('data-collapsed') ? '›' : '‹';
+}
+
+function initIntersectionObserver(): void {
+  if (sidebarObserver) {
+    sidebarObserver.disconnect();
+    sidebarObserver = null;
+  }
+  const board = document.querySelector<HTMLElement>('main#board');
+  if (!board) return;
+
+  const debouncedUpdate = debounce((stage: string) => setActiveSidebarItem(stage), 100);
+
+  sidebarObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          const stage = (entry.target as HTMLElement).dataset.column;
+          if (stage) debouncedUpdate(stage);
+          break;
+        }
+      }
+    },
+    { root: board, threshold: 0.5, rootMargin: '0px' }
+  );
+
+  document.querySelectorAll<HTMLElement>('.column[data-column]').forEach(col => {
+    sidebarObserver!.observe(col);
+  });
+
+  requestAnimationFrame(() => {
+    const first = document.querySelector<HTMLElement>('.column[data-column]');
+    if (first?.dataset.column) setActiveSidebarItem(first.dataset.column);
+  });
+}
+
+function initSidebar(): void {
+  const sidebar = document.querySelector<HTMLElement>('aside.sidebar');
+  if (!sidebar) return;
+  if (localStorage.getItem('kanban-sidebar-collapsed') === 'true') {
+    sidebar.setAttribute('data-collapsed', '');
+  }
+  bindSidebarItems(sidebar);
+  bindCollapseToggle(sidebar);
+  initIntersectionObserver();
+}
 
 function setAuthMessage(message: string, tone: "default" | "error" | "success" = "default") {
   const messageEl = document.getElementById("auth-message")!;
@@ -2359,6 +2444,7 @@ async function loadBoard() {
     setupMobileBoardInteractions();
     applySearchFilter();
     applyClientCategoryFilter();
+    initSidebar();
 
     const addBtn = document.getElementById("add-card-btn");
     if (addBtn) {

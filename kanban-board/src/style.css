@@ -206,6 +206,12 @@ aside.sidebar[data-collapsed] .sidebar-label {
   box-shadow: inset 3px 0 0 var(--color-done);
 }
 
+.sidebar-item.active {
+  background: var(--color-surface-card);
+  color: var(--color-on-surface-bright);
+  font-weight: 600;
+}
+
 .sidebar-collapse-btn {
   display: flex;
   align-items: center;
