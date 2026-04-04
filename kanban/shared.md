@@ -286,3 +286,73 @@ The `model` value should be the resolved provider model from `models.json` (not 
 | `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` | `test` or `impl` |
 | `Ranger` | `title`, `implementation_notes` | `test_results` | `done` or `impl` |
 | All agents | — | append signed entry to `agent_log` | — |
+
+## Task Dependencies
+
+### Convention
+
+To declare dependencies, write `Depends on: #ID` (or `Depends on: #ID1, #ID2`) on the **first non-blank line** of the task description.
+
+Example:
+```
+Depends on: #2100, #2150
+Add task dependency context injection to kanban-run...
+```
+
+### Parsing
+
+Regex: `Depends on:\s*(#\d+(?:,\s*#\d+)*)`  (case-insensitive)
+
+Extract each `#ID` number. If the line is absent or no IDs match, dependency list is empty.
+
+### Fetching Dependency Data
+
+For each dependency ID, fetch:
+```bash
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes"
+```
+
+All fields are fetched once and cached. Per-agent filtering happens at context assembly time, not at fetch time.
+
+### Per-Agent Injection Rules
+
+| Agent | Fields Injected | Truncation |
+|-------|----------------|------------|
+| `Planner` | `decision_log` + `implementation_notes` | 500 chars each |
+| `Builder` | `implementation_notes` | 500 chars |
+| `Inspector` | `decision_log` | 300 chars |
+
+Truncation format: first N chars + `...[truncated]` suffix when the field exceeds the limit.
+
+### Context Format (per dependency)
+
+```
+### #<DEP_ID>: <title> [<status>]
+[IN PROGRESS] ← only if status != done
+
+**Decision Log:**
+<decision_log truncated per agent rule>
+
+**Implementation Notes:**
+<implementation_notes truncated per agent rule>
+```
+
+Fields not applicable to the current agent are omitted entirely.
+
+### Error Handling
+
+- **404 response**: warn in orchestrator log, skip that dependency, continue pipeline
+- **Dep task in progress** (status != `done`): prepend `[IN PROGRESS]` warning to that dep's context block
+- **Circular dependency**: if current task ID appears in a dependency's `Depends on:` line, emit error and abort the pipeline
+- **No dependencies**: `<dependencies_context>` resolves to empty string; no behavioral change
+
+### Review Feedback Injection
+
+These placeholders carry feedback from previous review cycles (re-runs):
+
+| Placeholder | Source Field | When Populated |
+|-------------|-------------|----------------|
+| `<critic_feedback>` | `plan_review_comments` | Planner re-run: last entry's `comment` from the JSON array |
+| `<inspector_feedback>` | `review_comments` | Builder re-run: last entry's `comment` from the JSON array |
+
+If the source field is empty or null (first run), the placeholder resolves to empty string.

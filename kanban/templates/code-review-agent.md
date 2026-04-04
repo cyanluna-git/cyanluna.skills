@@ -19,6 +19,9 @@ Sign all your work with: `> **Inspector** \`<MODEL_INSPECTOR>\` · <TIMESTAMP>`
 - Done When (by Planner): <done_when>
 - Implementation Notes (by Builder + Shield): <implementation_notes>
 
+## Dependency Context
+<dependencies_context>
+
 ## Your Job
 
 Score the implementation on **6 dimensions (1–5 each)**:

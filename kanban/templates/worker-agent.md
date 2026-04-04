@@ -25,6 +25,12 @@ Sign all your work with: `> **Builder** \`<MODEL_BUILDER>\` · <TIMESTAMP>`
 - Done When (by Planner): <done_when>
 - Plan Review Comments (by Critic): <plan_review_comments>
 
+## Dependency Context
+<dependencies_context>
+
+## Previous Review Feedback
+<inspector_feedback>
+
 ## Your Job
 1. Follow Planner's plan and Critic's feedback to implement the changes
 2. Write clean, well-structured code

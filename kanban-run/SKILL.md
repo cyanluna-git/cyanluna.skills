@@ -9,6 +9,8 @@ license: MIT
 
 ## Commands
 
+In Codex environments, this skill may be invoked directly as a slash command text such as `$kanban-run <ID>` or `$kanban-run <ID> --auto`.
+
 ### `/kanban-run step <ID>` — Single Step
 
 Execute only the next pipeline step then exit. Same logic as `/kanban-run` but no loop.
@@ -143,9 +145,9 @@ Template files are at `../kanban/templates/`.
 
 | Nickname | Required Fields |
 |----------|----------------|
-| `Planner` | `title,description` |
+| `Planner` | `title,description,plan_review_comments` |
 | `Critic` | `title,description,plan,decision_log,done_when` |
-| `Builder` | `title,description,plan,done_when,plan_review_comments` |
+| `Builder` | `title,description,plan,done_when,plan_review_comments,review_comments` |
 | `Shield` | `title,description,implementation_notes` |
 | `Inspector` | `title,description,plan,done_when,implementation_notes` |
 | `Ranger` | `title,implementation_notes` |
@@ -158,13 +160,91 @@ Template files are at `../kanban/templates/`.
    PROJECT_BRIEF = extract .brief field (empty string if null or project not found)
    This is injected into every agent template via <project_brief> placeholder.
 
+⓪ʙ Resolve dependencies & review feedback (once per pipeline run, cache for all agents)
+
+   **Parse dependencies from description:**
+   ```bash
+   # Extract dependency IDs from description (case-insensitive)
+   DESCRIPTION=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=description" | jq -r '.description // ""')
+   DEP_IDS=$(echo "$DESCRIPTION" | grep -ioP 'Depends on:\s*\K#\d+(?:,\s*#\d+)*' | grep -oP '\d+' || true)
+   ```
+
+   **Circular dependency check:**
+   If `$ID` (current task) appears in any dependency's own `Depends on:` line, emit error and abort:
+   ```bash
+   for DEP_ID in $DEP_IDS; do
+     DEP_TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$DEP_ID?project=$PROJECT&fields=title,status,description,decision_log,implementation_notes")
+     HTTP_CODE=$(echo "$DEP_TASK" | jq -r '.id // empty')
+     if [ -z "$HTTP_CODE" ]; then
+       echo "WARNING: dependency #$DEP_ID not found (404), skipping"
+       continue
+     fi
+     DEP_DESC=$(echo "$DEP_TASK" | jq -r '.description // ""')
+     if echo "$DEP_DESC" | grep -iqP "Depends on:.*#$ID\\b"; then
+       echo "ERROR: circular dependency detected — #$ID ↔ #$DEP_ID. Aborting."
+       exit 1
+     fi
+     # Cache: DEPS[$DEP_ID] = { title, status, decision_log, implementation_notes }
+   done
+   ```
+
+   **Build per-agent dependency context string:**
+   For each cached dependency, assemble context based on the current agent:
+
+   - **Planner**: `decision_log` (500 chars) + `implementation_notes` (500 chars)
+   - **Builder**: `implementation_notes` (500 chars)
+   - **Inspector**: `decision_log` (300 chars)
+
+   Truncation: if field length > limit, take first N chars + `...[truncated]`.
+   If dep status != `done`: prepend `[IN PROGRESS]` warning to that dep's block.
+   If no dependencies: `DEPS_CONTEXT=""` (empty string — placeholder removed cleanly).
+
+   Format per dependency:
+   ```
+   ### #<DEP_ID>: <title> [<status>]
+   [IN PROGRESS]
+
+   **Decision Log:**
+   <truncated decision_log>
+
+   **Implementation Notes:**
+   <truncated implementation_notes>
+   ```
+
+   **Extract review feedback for re-runs:**
+   ```bash
+   # Critic feedback (for Planner re-run)
+   CRITIC_FEEDBACK=""
+   PLAN_REVIEW_COMMENTS=$(echo "$TASK" | jq -r '.plan_review_comments // ""')
+   if [ -n "$PLAN_REVIEW_COMMENTS" ] && [ "$PLAN_REVIEW_COMMENTS" != "null" ]; then
+     CRITIC_FEEDBACK=$(echo "$PLAN_REVIEW_COMMENTS" | python3 -c "
+   import sys, json
+   data = json.load(sys.stdin)
+   if isinstance(data, list) and len(data) > 0:
+     print(data[-1].get('comment', ''))
+   ")
+   fi
+
+   # Inspector feedback (for Builder re-run)
+   INSPECTOR_FEEDBACK=""
+   REVIEW_COMMENTS=$(echo "$TASK" | jq -r '.review_comments // ""')
+   if [ -n "$REVIEW_COMMENTS" ] && [ "$REVIEW_COMMENTS" != "null" ]; then
+     INSPECTOR_FEEDBACK=$(echo "$REVIEW_COMMENTS" | python3 -c "
+   import sys, json
+   data = json.load(sys.stdin)
+   if isinstance(data, list) and len(data) > 0:
+     print(data[-1].get('comment', ''))
+   ")
+   fi
+   ```
+
 ① Read task fields (use per-agent fields to minimize token usage)
    # Planner
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan_review_comments
    # Critic
    TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,decision_log,done_when
    # Builder
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,done_when,plan_review_comments
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,done_when,plan_review_comments,review_comments
    # Shield
    TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,implementation_notes
    # Inspector
@@ -191,6 +271,9 @@ Template files are at `../kanban/templates/`.
      <done_when>              → done_when field value
      <implementation_notes>   → implementation_notes field value
      <plan_review_comments>   → plan_review_comments field value
+     <dependencies_context>   → per-agent dep context from step ⓪ʙ (empty string if none)
+     <critic_feedback>        → latest plan_review_comments comment (empty if first run)
+     <inspector_feedback>     → latest review_comments comment (empty if first run)
      <TIMESTAMP>              → current UTC time (ISO 8601)
      <MODEL_PLANNER>          → $MODEL_PLANNER
      <MODEL_CRITIC>           → $MODEL_CRITIC
@@ -221,6 +304,9 @@ Template files are at `../kanban/templates/`.
      --set done_when="$DONE_WHEN" \
      --set implementation_notes="$IMPLEMENTATION_NOTES" \
      --set plan_review_comments="$PLAN_REVIEW_COMMENTS" \
+     --set dependencies_context="$DEPS_CONTEXT" \
+     --set critic_feedback="$CRITIC_FEEDBACK" \
+     --set inspector_feedback="$INSPECTOR_FEEDBACK" \
      --set TIMESTAMP="$TIMESTAMP")
    ```
    If a field is missing, pass empty string (`--set key=""`).
