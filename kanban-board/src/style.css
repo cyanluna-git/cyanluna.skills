@@ -31,6 +31,9 @@
   --color-primary: #3bbffa;
   --color-primary-hover: #2563eb;
   --color-on-primary: #fff;
+  --color-epic: #f59e0b;
+  --color-epic-bg: #1c1506;
+  --color-epic-border: rgba(245, 158, 11, 0.35);
 
   /* Priority */
   --color-priority-high: #fca5a5;
@@ -2728,5 +2731,153 @@ aside.sidebar[data-collapsed] ~ main#chronicle-view {
   #list-view,
   #chronicle-view {
     margin-left: 0;
+  }
+}
+
+/* ── Epic Swimlane ───────────────────────────────────────────────���────────── */
+.epic-swimlane {
+  margin: 0 0 0 var(--sidebar-width, 200px);
+  padding: 0 16px 12px;
+  background: var(--color-epic-bg);
+  border-bottom: 1px solid var(--color-epic-border);
+  transition: margin-left 0.2s ease;
+}
+aside.sidebar[data-collapsed] ~ .epic-swimlane {
+  margin-left: var(--sidebar-collapsed-width);
+}
+.epic-swimlane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 8px;
+  cursor: default;
+  user-select: none;
+}
+.epic-swimlane-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-epic);
+  font-size: 1rem;
+  padding: 0;
+  line-height: 1;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.epic-swimlane-toggle:hover { background: rgba(245,158,11,0.12); }
+.epic-swimlane-chevron {
+  display: inline-block;
+  transition: transform 0.2s ease;
+  transform: rotate(90deg);
+}
+.epic-swimlane--collapsed .epic-swimlane-chevron {
+  transform: rotate(0deg);
+}
+.epic-swimlane-label {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-epic);
+}
+.epic-swimlane-count {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(245,158,11,0.15);
+  color: var(--color-epic);
+}
+.epic-swimlane-track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(245,158,11,0.2) transparent;
+}
+.epic-swimlane--collapsed .epic-swimlane-track {
+  display: none;
+}
+
+/* Epic Card */
+.epic-card {
+  flex: 0 0 260px;
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-epic-border);
+  border-left: 3px solid var(--color-epic);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.epic-card:hover {
+  border-color: var(--color-epic);
+  background: var(--color-surface-card-high);
+}
+.epic-card-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.epic-card-icon { font-size: 0.78rem; opacity: 0.8; }
+.epic-card-id {
+  font-size: 0.68rem;
+  color: var(--color-outline);
+  font-weight: 600;
+}
+.epic-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-on-surface);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.epic-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+}
+.epic-card--highlight {
+  outline: 2px solid var(--color-epic);
+  outline-offset: 2px;
+  animation: epic-highlight-pulse 1.2s ease-out forwards;
+}
+@keyframes epic-highlight-pulse {
+  0%   { outline-color: var(--color-epic); }
+  100% { outline-color: transparent; }
+}
+
+/* Epic badge on task cards */
+.badge.epic-badge {
+  background: rgba(245,158,11,0.12);
+  color: var(--color-epic);
+  border: 1px solid rgba(245,158,11,0.25);
+  cursor: pointer;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge.epic-badge:hover {
+  background: rgba(245,158,11,0.22);
+}
+
+@media (max-width: 768px) {
+  .epic-swimlane {
+    margin-left: 0;
+    padding: 0 12px 10px;
   }
 }

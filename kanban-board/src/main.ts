@@ -7,6 +7,8 @@ interface Task {
   status: string;
   priority: string;
   rank: number;
+  card_type?: string;
+  epic_id?: number | null;
   description?: string | null;
   plan: string | null;
   implementation_notes: string | null;
@@ -40,6 +42,7 @@ interface Board {
   updated_at?: string | null;
   total?: number;
   counts?: Partial<Record<ColumnKey, number>>;
+  epics?: Task[];
   todo: Task[];
   plan: Task[];
   plan_review: Task[];
@@ -159,6 +162,7 @@ const summaryBoardCache = new Map<string, Board>();
 const summaryBoardEtagCache = new Map<string, string>();
 const summaryRevalidation = new Map<string, Promise<void>>();
 let sidebarObserver: IntersectionObserver | null = null;
+let currentEpics: Task[] = [];
 const VALID_STAGES = new Set(['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']);
 const hiddenStages = new Set<string>(
   (JSON.parse(localStorage.getItem('kanban-hidden-stages') || '[]') as string[])
@@ -1082,6 +1086,11 @@ function renderCard(task: Task, suppressStatus = false): string {
       ? `<span class="badge project">${task.project}</span>`
       : "";
 
+  const epicParent = task.epic_id ? currentEpics.find(e => e.id === task.epic_id) : null;
+  const epicBadge = epicParent
+    ? `<span class="badge epic-badge" data-epic-id="${epicParent.id}" title="${escapeHtml(epicParent.title)}">📌 ${escapeHtml(epicParent.title.replace(/^\[Explore\]\s*/i, '').slice(0, 18))}${epicParent.title.replace(/^\[Explore\]\s*/i, '').length > 18 ? '…' : ''}</span>`
+    : '';
+
   // Status badge for pipeline stages (suppressed when card is in its own column)
   const statusLabel = STATUS_BADGES[task.status];
   const statusBadge = (statusLabel && !suppressStatus)
@@ -1164,6 +1173,7 @@ function renderCard(task: Task, suppressStatus = false): string {
       <div class="card-title">${task.title}</div>
       <div class="card-footer">
         ${projectBadge}
+        ${epicBadge}
         ${planReviewBadge}
         ${reviewBadge}
         ${notesBadge}
@@ -1173,6 +1183,118 @@ function renderCard(task: Task, suppressStatus = false): string {
       ${tags ? `<div class="card-tags">${tags}</div>` : ""}
     </div>
   `;
+}
+
+const EPIC_SWIMLANE_COLLAPSED_KEY = 'kanban-epic-swimlane-collapsed';
+
+function renderEpicCard(epic: Task): string {
+  const statusLabel = epic.status === 'done' ? '✅' : epic.status === 'todo' ? '' : `<span class="badge status-${epic.status}">${epic.status}</span>`;
+  const dateBadge = epic.completed_at
+    ? `<span class="badge date">${epic.completed_at.slice(0, 10)}</span>`
+    : epic.created_at
+      ? `<span class="badge created">${timeAgo(epic.created_at)}</span>`
+      : '';
+  const projectBadge = !currentProject && epic.project
+    ? `<span class="badge project">${escapeHtml(epic.project)}</span>`
+    : '';
+  return `
+    <div class="epic-card" data-id="${epic.id}" data-project="${escapeHtml(epic.project)}" title="${escapeHtml(epic.title)}">
+      <div class="epic-card-header">
+        <span class="epic-card-icon">📌</span>
+        <span class="epic-card-id">#${epic.id}</span>
+        ${statusLabel}
+      </div>
+      <div class="epic-card-title">${escapeHtml(epic.title.replace(/^\[Explore\]\s*/i, ''))}</div>
+      <div class="epic-card-footer">
+        ${projectBadge}
+        ${dateBadge}
+      </div>
+    </div>
+  `;
+}
+
+function renderEpicSwimlane(epics: Task[]): void {
+  const existing = document.getElementById('epic-swimlane');
+  if (!epics || epics.length === 0) {
+    if (existing) existing.remove();
+    return;
+  }
+
+  const filtered = currentProject
+    ? epics.filter(e => e.project === currentProject)
+    : epics;
+
+  const isCollapsed = localStorage.getItem(EPIC_SWIMLANE_COLLAPSED_KEY) === 'true';
+  const html = `
+    <section id="epic-swimlane" class="epic-swimlane${isCollapsed ? ' epic-swimlane--collapsed' : ''}">
+      <div class="epic-swimlane-header">
+        <button class="epic-swimlane-toggle" aria-expanded="${!isCollapsed}" aria-label="Toggle epics">
+          <span class="epic-swimlane-chevron">›</span>
+        </button>
+        <span class="epic-swimlane-label">📌 Epics</span>
+        <span class="epic-swimlane-count">${filtered.length}</span>
+      </div>
+      <div class="epic-swimlane-track">
+        ${filtered.map(renderEpicCard).join('')}
+      </div>
+    </section>
+  `;
+
+  const board = document.getElementById('board')!;
+  if (existing) {
+    existing.outerHTML = html;
+  } else {
+    board.insertAdjacentHTML('beforebegin', html);
+  }
+
+  const swimlane = document.getElementById('epic-swimlane')!;
+  const toggle = swimlane.querySelector<HTMLButtonElement>('.epic-swimlane-toggle')!;
+  toggle.addEventListener('click', () => {
+    const collapsed = swimlane.classList.toggle('epic-swimlane--collapsed');
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    localStorage.setItem(EPIC_SWIMLANE_COLLAPSED_KEY, String(collapsed));
+  });
+
+  swimlane.querySelectorAll<HTMLElement>('.epic-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = parseInt(card.dataset.id!);
+      const project = card.dataset.project;
+      showTaskDetail(id, project);
+    });
+  });
+}
+
+function populateEpicSelect(): void {
+  const select = document.getElementById('add-epic') as HTMLSelectElement | null;
+  if (!select) return;
+  const prev = select.value;
+  const epicsForProject = currentProject
+    ? currentEpics.filter(e => e.project === currentProject)
+    : currentEpics;
+  select.innerHTML = '<option value="">— No epic —</option>'
+    + epicsForProject
+        .sort((a, b) => a.project.localeCompare(b.project) || b.id - a.id)
+        .map(e => {
+          const label = escapeHtml(e.title.replace(/^\[Explore\]\s*/i, ''));
+          const proj = currentProject ? '' : ` [${escapeHtml(e.project)}]`;
+          return `<option value="${e.id}">${label}${proj}</option>`;
+        }).join('');
+  if (prev) select.value = prev;
+}
+
+function jumpToEpic(epicId: number): void {
+  const swimlane = document.getElementById('epic-swimlane');
+  if (!swimlane) return;
+  if (swimlane.classList.contains('epic-swimlane--collapsed')) {
+    const toggle = swimlane.querySelector<HTMLButtonElement>('.epic-swimlane-toggle');
+    toggle?.click();
+  }
+  const epicCard = swimlane.querySelector<HTMLElement>(`.epic-card[data-id="${epicId}"]`);
+  if (epicCard) {
+    epicCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    epicCard.classList.add('epic-card--highlight');
+    setTimeout(() => epicCard.classList.remove('epic-card--highlight'), 1200);
+  }
 }
 
 function wrapWithProjectGroups(tasks: Task[], renderFn: (t: Task) => string): string {
@@ -2163,13 +2285,17 @@ async function loadBoard() {
       renderCategoryFilter();
     }
 
+    currentEpics = data.epics ?? [];
+    renderEpicSwimlane(currentEpics);
+    populateEpicSelect();
+
     board.innerHTML = COLUMNS.map((col) =>
       renderColumn(
         col.key,
         col.label,
         col.icon,
-        data[col.key as keyof Omit<Board, "projects" | "counts">],
-        data.counts?.[col.key as ColumnKey] ?? data[col.key as keyof Omit<Board, "projects" | "counts">].length
+        data[col.key as keyof Omit<Board, "projects" | "counts" | "epics">],
+        data.counts?.[col.key as ColumnKey] ?? data[col.key as keyof Omit<Board, "projects" | "counts" | "epics">].length
       )
     ).join("");
 
@@ -2201,6 +2327,13 @@ async function loadBoard() {
             copyBtn.textContent = "✓";
             setTimeout(() => { copyBtn.textContent = orig; }, 1000);
           });
+          return;
+        }
+        const epicBadgeEl = (e.target as HTMLElement).closest(".epic-badge") as HTMLElement | null;
+        if (epicBadgeEl) {
+          e.stopPropagation();
+          const epicId = parseInt(epicBadgeEl.dataset.epicId!);
+          if (!isNaN(epicId)) jumpToEpic(epicId);
           return;
         }
         const id = parseInt((el as HTMLElement).dataset.id!);
@@ -2942,6 +3075,8 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
   const description = (document.getElementById("add-description") as HTMLTextAreaElement).value.trim() || null;
   const tagsRaw = (document.getElementById("add-tags") as HTMLInputElement).value.trim();
   const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : null;
+  const epicIdRaw = (document.getElementById("add-epic") as HTMLSelectElement | null)?.value;
+  const epicId = epicIdRaw ? parseInt(epicIdRaw) || null : null;
 
   const project = currentProject;
   if (!project) {
@@ -2956,7 +3091,7 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
   const res = await apiFetch("/api/task", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, priority, level, description, tags, project }),
+    body: JSON.stringify({ title, priority, level, description, tags, project, epic_id: epicId }),
   });
   const result = await res.json();
 

@@ -81,6 +81,8 @@ function summarizeBoardTask(task: Task) {
     status: task.status,
     priority: task.priority,
     level: task.level,
+    card_type: task.card_type,
+    epic_id: task.epic_id,
     current_agent: task.current_agent,
     plan_review_count: task.plan_review_count,
     impl_review_count: task.impl_review_count,
@@ -283,6 +285,9 @@ async function initializeSchema(sql: Sql): Promise<void> {
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
     `ALTER TABLE projects ADD COLUMN IF NOT EXISTS brief TEXT`,
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS card_type TEXT NOT NULL DEFAULT 'task' CHECK (card_type IN ('task','epic'))`,
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS epic_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL`,
+    `UPDATE tasks SET card_type = 'epic' WHERE tags LIKE '%explore-report%' AND card_type = 'task'`,
   ];
   for (const m of migrations) await sql.query(m);
 
@@ -361,6 +366,8 @@ interface Task {
   status: string;
   priority: string;
   rank: number;
+  card_type: string;
+  epic_id: number | null;
   description: string | null;
   plan: string | null;
   implementation_notes: string | null;
@@ -391,6 +398,7 @@ interface Board {
   updated_at?: string | null;
   total?: number;
   counts?: Partial<Record<typeof BOARD_STATUSES[number], number>>;
+  epics: Task[];
   todo: Task[];
   plan: Task[];
   plan_review: Task[];
@@ -478,7 +486,7 @@ export function kanbanApiPlugin(): Plugin {
           const todoLimit = compactBoard ? Math.max(0, Number.parseInt(reqUrl.searchParams.get("todo_limit") || "10", 10) || 10) : null;
           const doneLimit = compactBoard ? Math.max(0, Number.parseInt(reqUrl.searchParams.get("done_limit") || "10", 10) || 10) : null;
           const fields = summary
-            ? `id, project, title, status, priority, level, current_agent,
+            ? `id, project, title, status, priority, level, card_type, epic_id, current_agent,
                plan_review_count, impl_review_count, rank, tags,
                created_at, completed_at,
                review_comments, plan_review_comments, notes`
@@ -509,16 +517,19 @@ export function kanbanApiPlugin(): Plugin {
           );
           const projects = projectRows.map((r) => r.project);
 
-          let tasks: Task[];
+          let allTasks: Task[];
           if (projectParam) {
             const safe = sanitizeProject(projectParam);
-            tasks = await q<Task>(sql,
+            allTasks = await q<Task>(sql,
               `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank DESC, id DESC`, [safe]
             );
           } else {
-            tasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank DESC, id DESC`);
+            allTasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank DESC, id DESC`);
           }
 
+          const epicTasks = allTasks.filter((t) => t.card_type === "epic");
+          const tasks = allTasks.filter((t) => t.card_type !== "epic");
+          const epics = summary ? epicTasks.map(summarizeBoardTask) : epicTasks;
           const boardTasks = summary ? tasks.map(summarizeBoardTask) : tasks;
 
           const grouped = new Map<string, any[]>();
@@ -544,6 +555,7 @@ export function kanbanApiPlugin(): Plugin {
             updated_at: meta.updated_at,
             total: meta.total,
             counts,
+            epics,
             todo: groupedBoard.todo || [],
             plan: groupedBoard.plan || [],
             plan_review: groupedBoard.plan_review || [],
@@ -575,6 +587,7 @@ export function kanbanApiPlugin(): Plugin {
               "impl_review_count","level","attachments","notes","decision_log",
               "done_when","rank","created_at","started_at","planned_at",
               "reviewed_at","tested_at","completed_at","updated_at",
+              "card_type","epic_id",
             ]);
             const fieldsParam = reqUrl.searchParams.get("fields");
             const fields = fieldsParam
@@ -650,6 +663,10 @@ export function kanbanApiPlugin(): Plugin {
             if (body.level !== undefined)         { sets.push(`level = $${p++}`); vals.push(body.level); }
             if (body.decision_log !== undefined)  { sets.push(`decision_log = $${p++}`); vals.push(body.decision_log); }
             if (body.done_when !== undefined)     { sets.push(`done_when = $${p++}`); vals.push(body.done_when); }
+            if (body.card_type !== undefined && ["task","epic"].includes(body.card_type)) {
+              sets.push(`card_type = $${p++}`); vals.push(body.card_type);
+            }
+            if (body.epic_id !== undefined)       { sets.push(`epic_id = $${p++}`); vals.push(body.epic_id === null ? null : Number(body.epic_id)); }
 
             if (sets.length > 0) {
               sets.push("updated_at = NOW()");
@@ -787,6 +804,8 @@ export function kanbanApiPlugin(): Plugin {
             ? (typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags))
             : null;
           const level = body.level !== undefined ? parseInt(body.level) || 3 : 3;
+          const cardType = body.card_type === "epic" ? "epic" : "task";
+          const epicId = body.epic_id != null ? Number(body.epic_id) : null;
 
           const [maxRow] = await q<{ maxrank: number | null }>(sql,
             "SELECT MAX(rank) AS maxrank FROM tasks WHERE project = $1 AND status = 'todo'", [safe]
@@ -794,9 +813,9 @@ export function kanbanApiPlugin(): Plugin {
           const rank = (maxRow?.maxrank ?? 0) + 1;
 
           const [row] = await q<{ id: number }>(sql,
-            `INSERT INTO tasks (project, title, priority, description, tags, rank, level)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-            [safe, title, priority, description, tags, rank, level]
+            `INSERT INTO tasks (project, title, priority, description, tags, rank, level, card_type, epic_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+            [safe, title, priority, description, tags, rank, level, cardType, epicId]
           );
 
           res.setHeader("Content-Type", "application/json");
