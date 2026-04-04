@@ -49,14 +49,54 @@ curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
 ### `/kanban stats` — Statistics
 
 ```bash
-BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
-echo "$BOARD" | jq '{
-  todo: (.todo | length), plan: (.plan | length),
-  plan_review: (.plan_review | length), impl: (.impl | length),
-  impl_review: (.impl_review | length), test: (.test | length),
-  done: (.done | length),
-  total: ((.todo + .plan + .plan_review + .impl + .impl_review + .test + .done) | length)
-}'
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT")
+python3 << 'PY' <<< "$BOARD"
+import json, sys
+from collections import defaultdict
+
+board = json.load(sys.stdin)
+columns = ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']
+
+# Column counts
+counts = {col: len(board.get(col, [])) for col in columns}
+counts['total'] = sum(counts.values())
+print("## Column Counts\n")
+print("| Status | Count |")
+print("|--------|-------|")
+for col in columns:
+    print(f"| {col} | {counts[col]} |")
+print(f"| **total** | **{counts['total']}** |")
+
+# Token stats per agent
+agent_stats = defaultdict(lambda: {'entries': 0, 'tokens': 0})
+for col in columns:
+    for task in board.get(col, []):
+        raw = task.get('agent_log')
+        if not raw:
+            continue
+        try:
+            logs = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for entry in logs:
+            agent = entry.get('agent', 'unknown')
+            agent_stats[agent]['entries'] += 1
+            agent_stats[agent]['tokens'] += entry.get('tokens', 0)
+
+total_tokens = sum(v['tokens'] for v in agent_stats.values())
+total_entries = sum(v['entries'] for v in agent_stats.values())
+
+print("\n## Agent Token Usage\n")
+if total_tokens == 0:
+    print("No token data")
+else:
+    print("| Agent | Entries | Tokens (est.) |")
+    print("|-------|---------|---------------|")
+    for agent in sorted(agent_stats):
+        s = agent_stats[agent]
+        print(f"| {agent} | {s['entries']} | {s['tokens']:,} |")
+    print(f"| **Total** | **{total_entries}** | **{total_tokens:,}** |")
+PY
 ```
 
 ### `/kanban project` — Current Project Context (AI Context Docking)

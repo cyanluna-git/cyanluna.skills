@@ -63,8 +63,10 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/<ID>/plan-review?project
     "model": "<MODEL_CRITIC>",
     "status": "approved",
     "comment": "> **Critic** `<MODEL_CRITIC>` · <TIMESTAMP>\n\n<REVIEW_MARKDOWN>",
+    "tokens": <ESTIMATED_TOKENS>,
     "timestamp": "<TIMESTAMP>"
   }'
+# "tokens" is optional: estimated input+output tokens. Omit if unknown.
 ```
 
 `status` must be exactly `"approved"` or `"changes_requested"`.
