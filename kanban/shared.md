@@ -85,17 +85,58 @@ Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 
 Model keys are resolved to real provider models through `models.json`.
 
-### Valid Status Transitions
+### Move Protocol (이동 전 필수)
 
+카드를 이동하기 전 반드시 이 순서를 따른다.
+
+**Step 1 — 현재 상태 확인**
+
+```bash
+TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
+STATUS=$(echo "$TASK" | jq -r '.status')
+LEVEL=$(echo "$TASK" | jq -r '.level')
 ```
-todo        → plan
-plan        → plan_review, impl (L2: skip review), todo
-plan_review → impl (approve), plan (reject)
-impl        → impl_review
-impl_review → test (approve), impl (reject)
-test        → done (pass), impl (fail)
-done        → (terminal)
+
+**Step 2 — Level × Status 매트릭스로 다음 상태 결정**
+
+| 현재 Status  | L1 Quick | L2 Standard       | L3 Full                |
+|-------------|----------|-------------------|------------------------|
+| `todo`      | `impl`   | `plan`            | `plan`                 |
+| `plan`      | —        | `impl`            | `plan_review` / `todo` |
+| `plan_review` | —      | —                 | `impl` / `plan`        |
+| `impl`      | `done`   | `impl_review`     | `impl_review`          |
+| `impl_review` | —      | `done` / `impl`   | `test` / `impl`        |
+| `test`      | —        | —                 | `done` / `impl`        |
+| `done`      | (terminal) | (terminal)      | (terminal)             |
+
+**Step 3 — 이동 실행**
+
+```bash
+RESPONSE=$(curl -s -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d "{\"status\": \"$NEXT_STATUS\"}")
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | head -1)
 ```
+
+**400 발생 시 자기 교정 (1회)**
+
+```bash
+if [ "$HTTP_CODE" = "400" ]; then
+  # API 응답의 allowed 배열에서 유효한 목적지를 읽어 재시도
+  ALLOWED=$(echo "$BODY" | jq -r '.allowed[0]')
+  if [ -n "$ALLOWED" ] && [ "$ALLOWED" != "null" ]; then
+    curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+      -H 'Content-Type: application/json' \
+      -d "{\"status\": \"$ALLOWED\"}"
+  else
+    # allowed도 없으면: 상태 유지, agent_log에 기록, 사용자에게 알림
+    echo "ERROR: cannot move task $ID from $STATUS — API returned: $BODY"
+  fi
+fi
+```
+
+2회 연속 실패 시: 상태 유지, `agent_log`에 실패 내역 기록, 사용자에게 알림.
 
 ## API Access
 
