@@ -7,7 +7,17 @@ description: Run multiple kanban tasks end-to-end in planned order using the exi
 
 Execute several kanban tasks as one orchestrated batch. Expand task ranges, sort them by phase, run them one after another, and only open parallel lanes when independence is explicit and low-risk.
 
-This skill is an orchestrator, not a shortcut. For every task it runs, it must hand off to the `kanban-run` skill via the Skill tool and keep that task's pipeline honest.
+This skill is an orchestrator, not a shortcut. For every task it runs, it must hand off to the `kanban-run` skill and keep that task's pipeline honest.
+
+## Codex Invocation Rule
+
+When running inside Codex, if a dedicated Skill tool is not available, invoke the inner runner by issuing the slash command text directly:
+
+- `$kanban-run <ID>`
+- `$kanban-run <ID> --auto`
+
+Treat this as the Codex-native equivalent of `Skill(skill="kanban-run", args="...")`.
+Do not re-implement the `kanban-run` pipeline manually when this command path is available.
 
 ## Commands
 
@@ -27,7 +37,9 @@ Resume a previously stopped batch from the given task ID onward. Uses the same s
 - Accept task selectors like `500-504`, `500~504`, `500,501,504`, or whitespace-separated IDs.
 - Reverse ranges like `504-500` are normalized to ascending order (500, 501, 502, 503, 504).
 - Read `../kanban/shared.md` before any API call.
-- Invoke `kanban-run` for each individual task using the Skill tool — do not emulate or re-implement its pipeline.
+- Invoke `kanban-run` for each individual task using the Skill tool when available.
+- In Codex environments without the Skill tool, invoke `kanban-run` by issuing `$kanban-run ...` directly.
+- Do not emulate or re-implement the pipeline if one of the above invocation paths is available.
 
 ## Resources
 
@@ -95,10 +107,12 @@ Read the returned task list and proposed groups.
 
 ### 6. Execute each group
 
-**Sequential group**: invoke the Skill tool for each task in order (see Inner Task Contract for level-aware invocation).
+**Sequential group**: invoke `kanban-run` for each task in order (see Inner Task Contract for level-aware invocation).
 
 **Parallel group**:
-- Invoke the Skill tool for all tasks in the group concurrently (single message, multiple Skill tool calls).
+- Invoke `kanban-run` for all tasks in the group concurrently.
+- In environments with a Skill tool, this means multiple Skill tool calls in one message.
+- In Codex environments, this means multiple `$kanban-run ...` invocations only if the runtime truly supports concurrent slash command execution; otherwise stay sequential.
 - After the parallel group completes, run a git integrity check:
   ```bash
   git status --porcelain
@@ -137,7 +151,7 @@ When finished, summarize:
 ## Execution Notes
 
 - Be conservative. This skill is for throughput, not bravado.
-- Do not implement a task "freehand" and patch kanban state afterward as if `kanban-run` had happened. The batch runner must drive each task through the Skill tool.
+- Do not implement a task "freehand" and patch kanban state afterward as if `kanban-run` had happened. The batch runner must drive each task through `kanban-run`.
 - Treat `kanban-run` as the inner engine and `kanban-batch-run` as the outer scheduler.
 - For exploration-generated chains like `500-504`, assume sequential unless the phase model proves otherwise.
 - Do not invent hidden dependencies, but do not ignore obvious ones either.
@@ -148,7 +162,11 @@ When finished, summarize:
 
 ## Inner Task Contract
 
-For every task selected in the batch, invoke the `kanban-run` skill via the Skill tool.
+For every task selected in the batch, invoke `kanban-run`.
+
+- Preferred path: `Skill(skill="kanban-run", args="...")`
+- Codex fallback path: issue `$kanban-run ...` directly
+
 The batch runner must inherit `kanban-run`'s provider-aware model router, so Codex batch execution automatically uses the higher-tier Codex mappings from `../kanban/models.json`.
 
 ### Level-aware invocation
@@ -158,6 +176,14 @@ The batch runner must inherit `kanban-run`'s provider-aware model router, so Cod
 | L1 | `Skill(skill="kanban-run", args="<ID> --auto")` | same |
 | L2 | `Skill(skill="kanban-run", args="<ID>")` | `Skill(skill="kanban-run", args="<ID> --auto")` |
 | L3 | `Skill(skill="kanban-run", args="<ID>")` | `Skill(skill="kanban-run", args="<ID> --auto")` |
+
+Codex direct-command equivalent:
+
+| Level | Default mode | `--auto` flag |
+|-------|-------------|---------------|
+| L1 | `$kanban-run <ID> --auto` | same |
+| L2 | `$kanban-run <ID>` | `$kanban-run <ID> --auto` |
+| L3 | `$kanban-run <ID>` | `$kanban-run <ID> --auto` |
 
 In default mode, L2/L3 tasks pause for user confirmation at review checkpoints. The batch runner waits for the Skill call to complete (including any user interaction) before moving to the next task.
 
@@ -177,7 +203,8 @@ STATUS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fi
 
 ### Rules
 
-- Do not emulate or re-implement the `kanban-run` pipeline. Always invoke it via the Skill tool.
+- Do not emulate or re-implement the `kanban-run` pipeline.
+- Always invoke it via the Skill tool when available, or via `$kanban-run ...` in Codex when the Skill tool is unavailable.
 - If a task blocks (circuit breaker, review failure, ambiguity), the status check will surface it — stop the batch and report the exact resume task.
 - For parallel groups, issue multiple Skill tool calls in a single message so they run concurrently.
 
