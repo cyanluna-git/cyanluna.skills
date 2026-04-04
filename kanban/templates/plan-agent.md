@@ -20,6 +20,12 @@ Sign all your work with: `> **Planner** \`<MODEL_PLANNER>\` · <TIMESTAMP>`
 - Title: <title>
 - Requirements: <description>
 
+## Dependency Context
+<dependencies_context>
+
+## Previous Review Feedback
+<critic_feedback>
+
 ## Your Job
 1. Read the requirements carefully
 2. Analyze the codebase to understand the current state
