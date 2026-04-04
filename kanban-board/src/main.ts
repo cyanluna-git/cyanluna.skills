@@ -835,7 +835,7 @@ function parseJsonArray(raw: string | null | undefined): any[] {
   }
 }
 
-function renderCard(task: Task): string {
+function renderCard(task: Task, suppressStatus = false): string {
   const pClass = priorityClass(task.priority);
   const priorityBadge = pClass
     ? `<span class="badge ${pClass}">${task.priority}</span>`
@@ -852,9 +852,9 @@ function renderCard(task: Task): string {
       ? `<span class="badge project">${task.project}</span>`
       : "";
 
-  // Status badge for pipeline stages
+  // Status badge for pipeline stages (suppressed when card is in its own column)
   const statusLabel = STATUS_BADGES[task.status];
-  const statusBadge = statusLabel
+  const statusBadge = (statusLabel && !suppressStatus)
     ? `<span class="badge status-${task.status}">${statusLabel}</span>`
     : "";
 
@@ -970,11 +970,11 @@ function renderColumn(
         const group = groups.get(p)!;
         const label = p ? p.toUpperCase() : 'OTHER';
         return `<div class="priority-group-header priority-group-${p || 'other'}">${label} <span>${group.length}</span></div>`
-          + group.map(renderCard).join('');
+          + group.map(t => renderCard(t, true)).join('');
       })
       .join('');
   } else {
-    cardsHtml = sorted.map(renderCard).join('');
+    cardsHtml = sorted.map(t => renderCard(t, true)).join('');
   }
   const addBtn = key === "todo"
     ? `<button class="add-card-btn" id="add-card-btn" title="Add card">+</button>`
@@ -985,7 +985,7 @@ function renderColumn(
     <div class="column ${key}" data-column="${key}" data-mobile-expanded="${expanded}" data-total-count="${totalCount}">
       <div class="column-header">
         <button class="column-toggle-btn" type="button" data-column-toggle="${key}" aria-expanded="${expanded}">
-          <span class="column-toggle-label">${icon} ${label}</span>
+          <span class="column-toggle-label">${icon} <span class="column-label">${label}</span></span>
           <span class="column-toggle-meta">
             <span class="count"${countTitle}>${countLabel}</span>
             <span class="column-toggle-icon" aria-hidden="true">${expanded ? "−" : "+"}</span>

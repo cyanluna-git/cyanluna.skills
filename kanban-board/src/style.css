@@ -378,6 +378,14 @@ main#board.hidden {
   min-width: 0;
 }
 
+.column-label {
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 .column-toggle-meta {
   display: flex;
   align-items: center;
