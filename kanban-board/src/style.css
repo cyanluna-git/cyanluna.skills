@@ -180,6 +180,33 @@ header h1 {
   cursor: pointer;
 }
 
+#category-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cat-chip {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #64748b;
+  font-size: 0.74rem;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.cat-chip:hover {
+  border-color: #475569;
+  color: #94a3b8;
+}
+.cat-chip.active {
+  background: #172554;
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+
 #project-filter {
   display: flex;
   align-items: center;
@@ -1690,6 +1717,13 @@ details.phase-agent-log[open] > summary::before {
   #sort-select,
   #project-filter {
     flex: 0 0 auto;
+  }
+  #category-filter {
+    flex-wrap: wrap;
+  }
+  .cat-chip {
+    flex: 1 1 auto;
+    text-align: center;
   }
   .toolbar-secondary .toolbar-toggle-btn {
     justify-content: center;
