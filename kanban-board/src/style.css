@@ -70,6 +70,11 @@
   /* Chip active */
   --color-chip-active-bg: #172554;
 
+  /* Layout */
+  --header-height: 56px;
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 56px;
+
   /* Fonts */
   --font-display: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -107,6 +112,119 @@ header {
   position: sticky;
   top: 0;
   z-index: 50;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+aside.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  height: 100vh;
+  padding-top: var(--header-height);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-outline-variant);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  transition: width 200ms ease;
+}
+
+aside.sidebar[data-collapsed] {
+  width: var(--sidebar-collapsed-width);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-item:hover {
+  background: var(--color-surface-card);
+  color: var(--color-on-surface);
+}
+
+.sidebar-icon {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-size: 1rem;
+}
+
+.sidebar-label {
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 200ms ease;
+}
+
+aside.sidebar[data-collapsed] .sidebar-label {
+  opacity: 0;
+  width: 0;
+}
+
+/* Stage accent inset box-shadows */
+.sidebar-item[data-stage="todo"] {
+  box-shadow: inset 3px 0 0 var(--color-todo);
+}
+.sidebar-item[data-stage="plan"] {
+  box-shadow: inset 3px 0 0 var(--color-plan);
+}
+.sidebar-item[data-stage="plan_review"] {
+  box-shadow: inset 3px 0 0 var(--color-plan-review);
+}
+.sidebar-item[data-stage="impl"] {
+  box-shadow: inset 3px 0 0 var(--color-impl);
+}
+.sidebar-item[data-stage="impl_review"] {
+  box-shadow: inset 3px 0 0 var(--color-impl-review);
+}
+.sidebar-item[data-stage="test"] {
+  box-shadow: inset 3px 0 0 var(--color-test);
+}
+.sidebar-item[data-stage="done"] {
+  box-shadow: inset 3px 0 0 var(--color-done);
+}
+
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 10px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--color-outline-variant);
+  color: var(--color-outline);
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-btn:hover {
+  background: var(--color-surface-card);
+  color: var(--color-on-surface);
 }
 
 .header-left {
@@ -210,6 +328,8 @@ header h1 {
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(64, 72, 93, 0.10);
   flex-shrink: 0;
+  margin-left: var(--sidebar-width);
+  transition: margin-left 200ms ease;
 }
 
 .toolbar-primary,
@@ -329,6 +449,8 @@ main#board {
   gap: 0;
   height: calc(100vh - 57px - 44px);
   overflow-x: auto;
+  margin-left: var(--sidebar-width);
+  transition: margin-left 200ms ease;
 }
 main#board.hidden {
   display: none;
@@ -1972,6 +2094,8 @@ details.phase-agent-log[open] > summary::before {
   padding: 16px 24px;
   height: calc(100vh - 57px);
   overflow-y: auto;
+  margin-left: var(--sidebar-width);
+  transition: margin-left 200ms ease;
 }
 #list-view.hidden {
   display: none;
@@ -2298,6 +2422,8 @@ pre.mermaid svg {
   height: calc(100vh - 112px);
   overflow-y: auto;
   padding: 32px 24px;
+  margin-left: var(--sidebar-width);
+  transition: margin-left 200ms ease;
 }
 
 .chronicle-timeline {
@@ -2460,6 +2586,8 @@ pre.mermaid svg {
   position: relative;
   overflow: hidden;
   padding: 0;
+  margin-left: var(--sidebar-width);
+  transition: margin-left 200ms ease;
 }
 #graph-view.hidden {
   display: none;
@@ -2560,5 +2688,28 @@ pre.mermaid svg {
 @media (max-width: 600px) {
   #tab-graph {
     display: none;
+  }
+}
+
+/* ── Sidebar collapsed state — sibling margin shifts ─────────── */
+aside.sidebar[data-collapsed] ~ .toolbar,
+aside.sidebar[data-collapsed] ~ main#board,
+aside.sidebar[data-collapsed] ~ main#list-view,
+aside.sidebar[data-collapsed] ~ main#chronicle-view,
+aside.sidebar[data-collapsed] ~ main#graph-view {
+  margin-left: var(--sidebar-collapsed-width);
+}
+
+/* ── Mobile: hide sidebar, reset margins ─────────────────────── */
+@media (max-width: 767px) {
+  aside.sidebar {
+    display: none;
+  }
+  .toolbar,
+  main#board,
+  #list-view,
+  #chronicle-view,
+  #graph-view {
+    margin-left: 0;
   }
 }
