@@ -138,7 +138,7 @@ def fetch_task(
     except urllib.error.URLError as exc:
         raise SystemExit(
             f"failed to connect to {url}: {exc.reason} (auth_token={auth_state})\n"
-            "Is the kanban-board server running? Start it with: ./kanban-board/start.sh"
+            "Check KANBAN_BASE_URL, network access to the Vercel deployment, and X-Kanban-Auth configuration."
         ) from exc
 
 
@@ -367,7 +367,7 @@ def main() -> int:
         or os.environ.get("KANBAN_BASE_URL")
         or kanban_auth.get("KANBAN_BASE_URL")
         or config.get("base_url")
-        or "http://localhost:5173"
+        or "https://cyanlunakanban.vercel.app"
     )
     auth_token = (
         args.auth_token

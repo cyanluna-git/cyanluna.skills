@@ -22,7 +22,7 @@ All endpoints (except login) require: `Authorization: Bearer <access_token>`
 
 ## Kanban API Endpoints
 
-Base URL: `http://localhost:5173`
+Base URL: `https://cyanlunakanban.vercel.app`
 
 | Purpose | Method | Endpoint |
 |---------|--------|----------|

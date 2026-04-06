@@ -1,7 +1,7 @@
 # Kanban Shared Context
 
 Manages project tasks in **PostgreSQL** via the kanban-board HTTP API.
-All projects share a single centralized DB — the kanban-board server must be running for all operations.
+All projects share a single centralized DB on the deployed Vercel board.
 
 ## DB Path & Project Config
 
@@ -29,7 +29,7 @@ if [ -z "${AUTH_TOKEN:-}" ]; then
 fi
 
 # 4. Defaults
-BASE_URL="${BASE_URL:-http://localhost:5173}"
+BASE_URL="${BASE_URL:-https://cyanlunakanban.vercel.app}"
 AUTH_HEADER=()
 if [ -n "$AUTH_TOKEN" ]; then
   AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
@@ -40,7 +40,7 @@ If neither config file exists, prompt user to run `/kanban-init`, or fall back t
 
 ```bash
 PROJECT=$(basename "$(pwd)")
-BASE_URL="http://localhost:5173"
+BASE_URL="https://cyanlunakanban.vercel.app"
 AUTH_TOKEN=""
 AUTH_HEADER=()
 ```
@@ -140,8 +140,8 @@ fi
 
 ## API Access
 
-All DB operations go through the kanban-board HTTP API (`$BASE_URL`).
-Start the server with `./kanban-board/start.sh` before using any kanban commands when `BASE_URL` points to localhost.
+All DB operations go through the deployed kanban-board HTTP API (`$BASE_URL`).
+Do not bypass it with local DB access.
 
 ### API Endpoints
 
@@ -261,7 +261,7 @@ Or use Python `json.dumps()` to serialize the body safely.
 > **CRITICAL: If the API call fails, NEVER fall back to SQLite or any direct DB access.**
 > The kanban DB is PostgreSQL — there is no local SQLite file. Fix the API call and retry.
 
-- **Server not running**: Run `./kanban-board/start.sh` first and retry when using localhost
+- **Board unreachable**: Check `BASE_URL`, network reachability to `https://cyanlunakanban.vercel.app`, and whether `AUTH_TOKEN` is configured
 - **API error**: Debug the request (check JSON validity, `PROJECT`, `BASE_URL`, and whether `AUTH_TOKEN` is configured) — do NOT bypass the API
 - **Agent failure**: 1 retry on first failure; 2nd failure → keep status, log to `agent_log`, notify user
 - **Plan review loop**: `plan_review_count > 3` → circuit breaker, ask user

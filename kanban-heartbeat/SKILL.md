@@ -195,7 +195,7 @@ while i < len(args):
 # ── Auth setup ───────────────────────────────────────────────────
 import pathlib, os
 auth_file = pathlib.Path.home() / ".claude" / "kanban-auth"
-base_url = "http://localhost:5173"
+base_url = "https://cyanlunakanban.vercel.app"
 auth_token = ""
 
 if auth_file.exists():

@@ -194,6 +194,5 @@ Add to `.gitignore`:
 kanban-board/
 ```
 
-Start web board locally: `./kanban-board/start.sh` → `http://localhost:5173/?project=<PROJECT>`
-Remote boards work the same way via the configured `base_url`.
+Open the deployed board at `https://cyanlunakanban.vercel.app/?project=<PROJECT>` or via the configured `base_url`.
 Features: 7-column pipeline, drag-and-drop (valid transitions only), card lifecycle modal, agent log viewer, 10s auto-refresh.

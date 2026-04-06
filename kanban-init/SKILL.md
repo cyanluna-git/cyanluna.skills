@@ -10,8 +10,8 @@ No per-project DB file is created — the central PostgreSQL server handles stor
 ## Usage
 
 ```
-/kanban-init                                      — project name = basename of current directory, board = localhost
-/kanban-init my-project-name                      — explicit project name, board = localhost
+/kanban-init                                      — project name = basename of current directory, board = https://cyanlunakanban.vercel.app
+/kanban-init my-project-name                      — explicit project name, board = https://cyanlunakanban.vercel.app
 /kanban-init my-project-name https://board.example.com
                                                  — explicit project name + remote board URL
 /kanban-init https://board.example.com           — current directory name + remote board URL
@@ -41,7 +41,7 @@ else
   if [ -z "$PROJECT" ]; then
     PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
   fi
-  BASE_URL="${ARG2:-http://localhost:5173}"
+  BASE_URL="${ARG2:-https://cyanlunakanban.vercel.app}"
 fi
 
 ```
@@ -135,32 +135,7 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
 
 This is best-effort — if the API call fails (e.g., server not running), init still succeeds.
 
-### 3. Create `kanban-board/start.sh`
-
-```bash
-mkdir -p kanban-board
-```
-
-Write `kanban-board/start.sh`:
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-if [ -d "$HOME/.codex/kanban-board" ]; then
-  pnpm --dir "$HOME/.codex/kanban-board" dev
-elif [ -d "$HOME/.claude/kanban-board" ]; then
-  pnpm --dir "$HOME/.claude/kanban-board" dev
-else
-  echo "kanban-board not found in ~/.codex/kanban-board or ~/.claude/kanban-board" >&2
-  exit 1
-fi
-```
-
-Make executable:
-```bash
-chmod +x kanban-board/start.sh
-```
-
-### 4. Output confirmation
+### 3. Output confirmation
 
 Output:
 ```
@@ -170,7 +145,6 @@ Output:
   DB:      PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
   Auth:    ~/.claude/kanban-auth (global, shared across all projects)
-  Start:   ./kanban-board/start.sh
 
 Add tasks with /kanban add <title>
 ```
@@ -195,9 +169,7 @@ Options:
 2. Keep as-is — leave existing config unchanged
 ```
 
-- The central board (`~/.claude/kanban-board/`) must be installed. If `~/.claude/kanban-board/package.json` doesn't exist, warn the user.
-- The central board should exist in either `~/.codex/kanban-board/` or `~/.claude/kanban-board/`. If neither has `package.json`, warn the user.
-- `node_modules/` in the local `kanban-board/` is not created (no `pnpm install` needed — the central board handles its own deps).
-- The kanban-board server must be running (`./kanban-board/start.sh`) before using `/kanban` commands when `base_url` points at localhost.
+- `/kanban-init` should default to `https://cyanlunakanban.vercel.app` unless the user explicitly provides another deployment URL.
+- `node_modules/` in a local `kanban-board/` is not required for normal kanban usage.
 - Auth credentials are stored globally in `~/.claude/kanban-auth`, NOT in per-project kanban.json. This prevents token duplication across repos and keeps secrets out of git.
 - For remote private boards, set `KANBAN_AUTH_TOKEN` in the shell before running `/kanban-init`, or edit `~/.claude/kanban-auth` directly.

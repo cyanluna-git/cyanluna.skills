@@ -22,7 +22,7 @@ Each kanban project has a `worklog_type`:
 ### Project Settings Storage
 
 **Primary**: Kanban DB `project_settings` table (via `PUT /api/project-settings/:project`)
-**Fallback**: `~/.claude/worklog-sync.json` → `project_map` (for remote deployments without the table)
+**Fallback**: `~/.claude/worklog-sync.json` → `project_map` (only if the deployed API has not been updated yet)
 
 ```sql
 -- Kanban DB table (auto-created on connection)
@@ -53,7 +53,7 @@ curl -s "${AUTH_HEADER[@]}" -X PUT "$KANBAN_API/api/project-settings/$PROJECT" \
   -d '{"worklog_type":"work","eob_project_id":"<UUID>","default_work_type_code":"ENG-SW","label":"..."}'
 ```
 
-If the API returns 404 (remote deployment not yet updated), fall back to `project_map` in config file.
+If the API returns 404, fall back to `project_map` in config file. Do not read any local DB directly.
 
 ## Configuration
 
@@ -119,7 +119,7 @@ USER_ID=$(echo "$ME" | python3 -c "import sys,json; print(json.load(sys.stdin)['
 
 1. Fetch all kanban projects and their current settings:
 ```bash
-BOARD=$(curl -s "http://localhost:5173/api/board")
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$KANBAN_API/api/board")
 # board.projects = ["project-a", "project-b", ...]
 # board.project_settings = { "project-a": {...}, ... }
 ```
@@ -136,7 +136,7 @@ PROJECTS=$(curl -s "$EOB/api/projects/hierarchy" -H "Authorization: Bearer $TOKE
 
 4. Save via API:
 ```bash
-curl -s -X PUT "http://localhost:5173/api/project-settings/$PROJECT" \
+curl -s "${AUTH_HEADER[@]}" -X PUT "$KANBAN_API/api/project-settings/$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"worklog_type": "work", "eob_project_id": "...", "label": "..."}'
 ```
@@ -340,4 +340,4 @@ When `default_work_type_code` doesn't cover it, infer from task content:
 - **24h daily limit**: EOB API rejects worklogs if total hours for a day exceed 24.
 - **Duplicate prevention**: Checks existing worklogs before creating.
 - **Token expiry**: Access tokens expire in 30 min; auto-refreshes via refresh token (7 days).
-- **Kanban API fallback**: If localhost:5173 unreachable, query SQLite directly at `~/.claude/kanban-dbs/{project}.db`.
+- **Kanban API fallback**: Do not query any local DB directly. Use the deployed Kanban API, or fall back only to `project_map` for classification metadata.
