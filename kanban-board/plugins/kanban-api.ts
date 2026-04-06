@@ -282,7 +282,6 @@ async function initializeSchema(sql: Sql): Promise<void> {
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS decision_log TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
-    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS brief TEXT`,
   ];
   for (const m of migrations) await sql.query(m);
 
@@ -323,6 +322,19 @@ async function initializeSchema(sql: Sql): Promise<void> {
     )
   `);
 
+  await sql.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS brief TEXT`);
+
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS project_settings (
+      project TEXT PRIMARY KEY,
+      worklog_type TEXT NOT NULL DEFAULT 'work',
+      eob_project_id TEXT,
+      eob_product_line_id TEXT,
+      default_work_type_code TEXT DEFAULT 'ENG-SW',
+      label TEXT
+    )
+  `);
+
   await sql.query(`
     CREATE TABLE IF NOT EXISTS project_links (
       source_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
@@ -352,6 +364,15 @@ async function renumberRanks(sql: Sql, project: string, status: string): Promise
     ) sub
     WHERE tasks.id = sub.id
   `, [project, status]);
+}
+
+interface ProjectSettings {
+  project: string;
+  worklog_type: string;
+  eob_project_id: string | null;
+  eob_product_line_id: string | null;
+  default_work_type_code: string;
+  label: string | null;
 }
 
 interface Task {
@@ -399,6 +420,7 @@ interface Board {
   test: Task[];
   done: Task[];
   projects: string[];
+  project_settings: Record<string, ProjectSettings>;
 }
 
 export function kanbanApiPlugin(): Plugin {
@@ -539,6 +561,10 @@ export function kanbanApiPlugin(): Plugin {
               return [status, tasksForStatus];
             })
           );
+          const settingsRows = await q<ProjectSettings>(sql, "SELECT * FROM project_settings ORDER BY project");
+          const projectSettingsMap = Object.fromEntries(
+            settingsRows.map((row) => [row.project, row])
+          ) as Record<string, ProjectSettings>;
           const board: Board = {
             version: meta.version,
             updated_at: meta.updated_at,
@@ -552,6 +578,7 @@ export function kanbanApiPlugin(): Plugin {
             test: groupedBoard.test || [],
             done: groupedBoard.done || [],
             projects,
+            project_settings: projectSettingsMap,
           };
 
           res.setHeader("Content-Type", "application/json");
@@ -1007,6 +1034,59 @@ export function kanbanApiPlugin(): Plugin {
           broadcast();
           res.end(JSON.stringify({ success: true }));
           return;
+        }
+
+        // GET /api/project-settings — list all project settings
+        if (pathname === "/api/project-settings" && req.method === "GET") {
+          const rows = await q<ProjectSettings>(sql, "SELECT * FROM project_settings ORDER BY project");
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(rows));
+          return;
+        }
+
+        // GET/PUT /api/project-settings/:project
+        const settingsMatch = pathname.match(/^\/api\/project-settings\/(.+)$/);
+        if (settingsMatch) {
+          const project = sanitizeProject(decodeURIComponent(settingsMatch[1]));
+
+          if (req.method === "GET") {
+            const [row] = await q<ProjectSettings>(sql, "SELECT * FROM project_settings WHERE project = $1", [project]);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(row || {
+              project,
+              worklog_type: "work",
+              eob_project_id: null,
+              eob_product_line_id: null,
+              default_work_type_code: "ENG-SW",
+              label: null,
+            }));
+            return;
+          }
+
+          if (req.method === "PUT") {
+            const body = await parseBody(req);
+            await sql.query(`
+              INSERT INTO project_settings (project, worklog_type, eob_project_id, eob_product_line_id, default_work_type_code, label)
+              VALUES ($1, $2, $3, $4, $5, $6)
+              ON CONFLICT (project) DO UPDATE SET
+                worklog_type = EXCLUDED.worklog_type,
+                eob_project_id = EXCLUDED.eob_project_id,
+                eob_product_line_id = EXCLUDED.eob_product_line_id,
+                default_work_type_code = EXCLUDED.default_work_type_code,
+                label = EXCLUDED.label
+            `, [
+              project,
+              body.worklog_type || "work",
+              body.eob_project_id || null,
+              body.eob_product_line_id || null,
+              body.default_work_type_code || "ENG-SW",
+              body.label || null,
+            ]);
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
         }
 
         // GET /api/uploads/:filename — redirect to R2 public URL

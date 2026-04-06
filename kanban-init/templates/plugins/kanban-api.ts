@@ -49,6 +49,10 @@ function normalizeStatus(s: string): string {
   return STATUS_ALIASES[s] || s;
 }
 
+function sanitizeProject(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
 let _sql: Sql | null = null;
 let _schemaReady: Promise<void> | null = null;
 
@@ -135,6 +139,17 @@ async function initializeSchema(sql: Sql): Promise<void> {
   await sql.query(`UPDATE tasks SET priority = 'low'       WHERE priority = '낮음'`);
   await sql.query(`UPDATE tasks SET status = 'impl'        WHERE status = 'inprogress'`);
   await sql.query(`UPDATE tasks SET status = 'impl_review' WHERE status = 'review'`);
+
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS project_settings (
+      project TEXT PRIMARY KEY,
+      worklog_type TEXT NOT NULL DEFAULT 'work',
+      eob_project_id TEXT,
+      eob_product_line_id TEXT,
+      default_work_type_code TEXT DEFAULT 'ENG-SW',
+      label TEXT
+    )
+  `);
 }
 
 function ensureSchema(sql: Sql): Promise<void> {
@@ -156,6 +171,15 @@ async function renumberRanks(sql: Sql, project: string, status: string): Promise
     ) sub
     WHERE tasks.id = sub.id
   `, [project, status]);
+}
+
+interface ProjectSettings {
+  project: string;
+  worklog_type: string;
+  eob_project_id: string | null;
+  eob_product_line_id: string | null;
+  default_work_type_code: string;
+  label: string | null;
 }
 
 interface Task {
@@ -198,6 +222,7 @@ interface Board {
   test: Task[];
   done: Task[];
   projects: string[];
+  project_settings: Record<string, ProjectSettings>;
 }
 
 export function kanbanApiPlugin(): Plugin {
@@ -258,6 +283,10 @@ export function kanbanApiPlugin(): Plugin {
             if (arr) arr.push(t);
             else grouped.set(t.status, [t]);
           }
+          const settingsRows = await q<ProjectSettings>(sql, "SELECT * FROM project_settings ORDER BY project");
+          const projectSettingsMap = Object.fromEntries(
+            settingsRows.map((row) => [row.project, row])
+          ) as Record<string, ProjectSettings>;
           const board: Board = {
             todo: grouped.get("todo") || [],
             plan: grouped.get("plan") || [],
@@ -267,6 +296,7 @@ export function kanbanApiPlugin(): Plugin {
             test: grouped.get("test") || [],
             done: grouped.get("done") || [],
             projects,
+            project_settings: projectSettingsMap,
           };
 
           res.setHeader("Content-Type", "application/json");
@@ -647,6 +677,58 @@ export function kanbanApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ success: true }));
           return;
+        }
+
+        // GET /api/project-settings
+        if (pathname === "/api/project-settings" && req.method === "GET") {
+          const rows = await q<ProjectSettings>(sql, "SELECT * FROM project_settings ORDER BY project");
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(rows));
+          return;
+        }
+
+        // GET/PUT /api/project-settings/:project
+        const settingsMatch = pathname.match(/^\/api\/project-settings\/(.+)$/);
+        if (settingsMatch) {
+          const project = sanitizeProject(decodeURIComponent(settingsMatch[1]));
+
+          if (req.method === "GET") {
+            const [row] = await q<ProjectSettings>(sql, "SELECT * FROM project_settings WHERE project = $1", [project]);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(row || {
+              project,
+              worklog_type: "work",
+              eob_project_id: null,
+              eob_product_line_id: null,
+              default_work_type_code: "ENG-SW",
+              label: null,
+            }));
+            return;
+          }
+
+          if (req.method === "PUT") {
+            const body = await parseBody(req);
+            await sql.query(`
+              INSERT INTO project_settings (project, worklog_type, eob_project_id, eob_product_line_id, default_work_type_code, label)
+              VALUES ($1, $2, $3, $4, $5, $6)
+              ON CONFLICT (project) DO UPDATE SET
+                worklog_type = EXCLUDED.worklog_type,
+                eob_project_id = EXCLUDED.eob_project_id,
+                eob_product_line_id = EXCLUDED.eob_product_line_id,
+                default_work_type_code = EXCLUDED.default_work_type_code,
+                label = EXCLUDED.label
+            `, [
+              project,
+              body.worklog_type || "work",
+              body.eob_project_id || null,
+              body.eob_product_line_id || null,
+              body.default_work_type_code || "ENG-SW",
+              body.label || null,
+            ]);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
         }
 
         // GET /api/uploads/:filename
