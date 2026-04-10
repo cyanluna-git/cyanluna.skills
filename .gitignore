@@ -2,6 +2,9 @@ node_modules/
 **/__pycache__/
 screenshots/
 .vercel
+# build outputs
+kanban-board/dist/
+kanban-board/test-results/
 # skill install symlinks
 kanban-*/kanban-*
 kanban/kanban
