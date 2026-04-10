@@ -8,3 +8,23 @@ kanban-board/test-results/
 # skill install symlinks
 kanban-*/kanban-*
 kanban/kanban
+
+# Environment
+.env
+.env.local
+
+# Python
+.venv/
+*.pyc
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
