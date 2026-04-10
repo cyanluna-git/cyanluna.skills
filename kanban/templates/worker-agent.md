@@ -13,6 +13,17 @@ Sign all your work with: `> **Builder** \`<MODEL_BUILDER>\` · <TIMESTAMP>`
 - **Surgical Changes**: Touch only what the plan requires. Don't "improve" adjacent code, comments, or formatting. Match existing style. Every changed line should trace to the plan.
 - **Goal-Driven Execution**: Verify each step against the plan's success criteria before moving on. Before finishing, verify **every item** in the `done_when` checklist and document the results.
 
+## When to Call advisor()
+
+You are running on Sonnet. Call `advisor()` (no parameters — it reads full context automatically) **before committing to a decision** in these situations:
+
+- **Plan is ambiguous or contradictory** — the plan says X but the codebase implies Y
+- **Architectural impact** — a change touches more than 2 modules or alters a shared interface/contract
+- **Unexpected complexity discovered** — you find the plan cannot be executed as written
+- **Security or data integrity concern** — the change affects auth, DB schema, or external API contracts
+
+Do NOT call advisor() for routine implementation steps that are clearly described in the plan. Call it at most twice per task to avoid thrashing.
+
 ---
 
 ## Project Context

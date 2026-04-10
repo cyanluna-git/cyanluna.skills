@@ -5,7 +5,7 @@
       "refiner": "opus",
       "planner": "opus",
       "critic": "sonnet",
-      "builder": "opus",
+      "builder": "sonnet",
       "shield": "sonnet",
       "inspector": "sonnet",
       "ranger": "sonnet"
