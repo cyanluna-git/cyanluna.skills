@@ -166,4 +166,19 @@ for (const dbFile of dbFiles) {
   totalInserted += rows.length;
 }
 
-console.log(`\nSeeding complete. Inserted ${totalInserted} rows total.`);
+// Ensure every project that has tasks in Neon also has a row in the projects
+// table. This covers both newly-seeded projects and older migrations that
+// happened before the projects table existed. Metadata is left null — users
+// can backfill by running /kanban-init in each project directory.
+const allProjectsResult = await sql.query("SELECT DISTINCT project FROM tasks ORDER BY project");
+const allProjectIds = Array.from(allProjectsResult).map((row) => row.project);
+for (const project of allProjectIds) {
+  await sql.query(
+    `INSERT INTO projects (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING`,
+    [project]
+  );
+}
+
+console.log(
+  `\nSeeding complete. Inserted ${totalInserted} task rows. Ensured ${allProjectIds.length} projects table rows.`
+);
