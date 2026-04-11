@@ -373,6 +373,7 @@ export function kanbanApiPlugin(): Plugin {
             if (body.level !== undefined)         { sets.push(`level = $${p++}`); vals.push(body.level); }
             if (body.decision_log !== undefined)  { sets.push(`decision_log = $${p++}`); vals.push(body.decision_log); }
             if (body.done_when !== undefined)     { sets.push(`done_when = $${p++}`); vals.push(body.done_when); }
+            if (body.notes !== undefined)         { sets.push(`notes = $${p++}`); vals.push(body.notes); }
 
             if (sets.length > 0) {
               vals.push(id);
@@ -597,7 +598,7 @@ export function kanbanApiPlugin(): Plugin {
           if (!task) { res.statusCode = 404; res.end(JSON.stringify({ error: "Not found" })); return; }
 
           const notes = task.notes ? JSON.parse(task.notes) : [];
-          const note = { id: Date.now(), text: body.text || "", author: body.author || "user", timestamp: new Date().toISOString() };
+          const note = { id: Date.now(), text: body.text || body.content || "", author: body.author || "user", timestamp: new Date().toISOString() };
           notes.push(note);
 
           await sql.query("UPDATE tasks SET notes = $1 WHERE id = $2", [JSON.stringify(notes), id]);

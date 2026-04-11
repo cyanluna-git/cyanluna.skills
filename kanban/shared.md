@@ -186,7 +186,7 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/test-result?project=
 # Add note
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"content": "Commit: abc1234"}'
+  -d '{"text": "Commit: abc1234"}'
 
 # Reorder
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PROJECT" \
