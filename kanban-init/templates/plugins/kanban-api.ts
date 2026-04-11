@@ -597,7 +597,7 @@ export function kanbanApiPlugin(): Plugin {
           if (!task) { res.statusCode = 404; res.end(JSON.stringify({ error: "Not found" })); return; }
 
           const notes = task.notes ? JSON.parse(task.notes) : [];
-          const note = { id: Date.now(), text: body.text || "", author: body.author || "user", timestamp: new Date().toISOString() };
+          const note = { id: Date.now(), text: body.text || body.content || "", author: body.author || "user", timestamp: new Date().toISOString() };
           notes.push(note);
 
           await sql.query("UPDATE tasks SET notes = $1 WHERE id = $2", [JSON.stringify(notes), id]);
