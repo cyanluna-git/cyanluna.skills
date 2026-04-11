@@ -110,7 +110,10 @@ function extractStack(claudeMd) {
 
 const projects = modules.map((mod) => {
   const projectDir = resolve(DEV_ROOT, mod.path);
-  const claudeMd = readFileSafe(resolve(projectDir, "CLAUDE.md"));
+  // Prefer .claude/CLAUDE.md (common convention), fall back to root CLAUDE.md
+  const claudeMd =
+    readFileSafe(resolve(projectDir, ".claude", "CLAUDE.md")) ||
+    readFileSafe(resolve(projectDir, "CLAUDE.md"));
   const readmeMd = readFileSafe(resolve(projectDir, "README.md"));
 
   return {
