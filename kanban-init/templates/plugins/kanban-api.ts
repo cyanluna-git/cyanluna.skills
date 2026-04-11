@@ -373,6 +373,7 @@ export function kanbanApiPlugin(): Plugin {
             if (body.level !== undefined)         { sets.push(`level = $${p++}`); vals.push(body.level); }
             if (body.decision_log !== undefined)  { sets.push(`decision_log = $${p++}`); vals.push(body.decision_log); }
             if (body.done_when !== undefined)     { sets.push(`done_when = $${p++}`); vals.push(body.done_when); }
+            if (body.notes !== undefined)         { sets.push(`notes = $${p++}`); vals.push(body.notes); }
 
             if (sets.length > 0) {
               vals.push(id);
