@@ -101,16 +101,32 @@ else
   CATEGORY="personal"
 fi
 
-# Infer purpose from CLAUDE.md (first non-heading, non-empty line)
-PURPOSE=""
-if [ -f "CLAUDE.md" ]; then
-  PURPOSE=$(grep -v '^#' CLAUDE.md | grep -v '^---' | grep -v '^\s*$' | head -1 | cut -c1-300)
+# Locate CLAUDE.md — prefer .claude/CLAUDE.md (common convention), fall back to root
+CLAUDE_MD=""
+if [ -f ".claude/CLAUDE.md" ]; then
+  CLAUDE_MD=".claude/CLAUDE.md"
+elif [ -f "CLAUDE.md" ]; then
+  CLAUDE_MD="CLAUDE.md"
 fi
 
-# Infer stack from CLAUDE.md
+# Infer purpose from CLAUDE.md (first non-heading, non-empty, non-frontmatter line)
+PURPOSE=""
+PURPOSE_LINE=""
+if [ -n "$CLAUDE_MD" ]; then
+  PURPOSE_LINE=$(grep -v '^#' "$CLAUDE_MD" | grep -v '^---' | grep -v '^\s*$' | head -1)
+  PURPOSE=$(printf '%s' "$PURPOSE_LINE" | cut -c1-300)
+fi
+
+# Infer stack from CLAUDE.md — skip the purpose line so it doesn't echo back
 STACK=""
-if [ -f "CLAUDE.md" ]; then
-  STACK=$(grep -iE 'stack|tech|typescript|javascript|python|react|vue|next|node|vite' CLAUDE.md | head -1 | cut -c1-200)
+if [ -n "$CLAUDE_MD" ]; then
+  if [ -n "$PURPOSE_LINE" ]; then
+    STACK=$(grep -iE 'stack|tech|typescript|javascript|python|react|vue|next|node|vite' "$CLAUDE_MD" \
+      | grep -vFx -- "$PURPOSE_LINE" | head -1 | cut -c1-200)
+  else
+    STACK=$(grep -iE 'stack|tech|typescript|javascript|python|react|vue|next|node|vite' "$CLAUDE_MD" \
+      | head -1 | cut -c1-200)
+  fi
 fi
 
 # Infer repo_url from git remote
