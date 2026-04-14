@@ -1,0 +1,14 @@
+.env
+.env.*
+.DS_Store
+*.log
+kanban-board/
+node_modules/
+.next/
+.nuxt/
+dist/
+build/
+out/
+.turbo/
+coverage/
+.pnpm-store/
