@@ -39,6 +39,35 @@ python3 scripts/review_pr.py fetch <pr_url>
 
 Analyze the JSON output. If a `diff_file` key exists, the diff was saved to a separate file — read it using the Read tool.
 
+### Step 2.5: Understand Context & Author Intent
+
+**Always run this step.** Understand the author's intent before analyzing the diff.
+
+1. **Read PR description**: Check `pr.description` from Step 2 JSON (proceed even if empty)
+
+2. **Read PR comments**: Check the `pr_comments` array from Step 2 JSON
+   - Look for: author's self-explanation, reviewer questions, design decision discussions
+
+3. **Look up Jira story**: Check `jira_key` from Step 2 JSON
+   - If `jira_key` is present:
+     ```bash
+     python3 scripts/review_pr.py jira <jira_key>
+     ```
+   - If the command fails or returns no data, skip and continue
+   - If `jira_key` is null, manually scan PR title/branch for `[A-Z]+-\d+` pattern
+
+4. **Build INTENT_CONTEXT** by answering:
+   - What problem is being solved? (Jira summary + PR title)
+   - What was the agreed scope? (Jira description / AC)
+   - Are there intentional design decisions? (PR comments, commit messages)
+
+5. **Apply INTENT_CONTEXT** to:
+   - Write the "변경 요약" section accurately
+   - Avoid flagging intentional design decisions as issues
+   - Check whether implementation matches the Jira AC scope
+
+---
+
 ### Step 3: Auto-Detect Domain & Analyze Code
 
 1. Read the entire diff and detect the primary domain from file extensions:

@@ -45,6 +45,35 @@ python3 ../review-pr/scripts/review_pr.py fetch <pr_url>
 
 JSON 출력을 분석합니다. `diff_file` 키가 있으면 diff가 별도 파일로 저장된 것이므로 Read 도구로 해당 파일을 읽으세요.
 
+### Step 2.5: 컨텍스트 & 작성자 의도 파악
+
+**항상 실행합니다.** diff 분석 전에 작성자의 의도를 먼저 이해합니다.
+
+1. **PR 설명 읽기**: Step 2 JSON의 `pr.description` 확인 (비어 있어도 계속 진행)
+
+2. **PR 코멘트 읽기**: Step 2 JSON의 `pr_comments` 배열 확인
+   - 작성자의 자기 설명, 리뷰어 질문, 설계 결정 논의 내용 파악
+
+3. **Jira 스토리 조회**: Step 2 JSON의 `jira_key` 값 확인
+   - `jira_key`가 있으면:
+     ```bash
+     python3 ../review-pr/scripts/review_pr.py jira <jira_key>
+     ```
+   - JSON이 없거나 오류가 나면 무시하고 진행
+   - `jira_key`가 없으면 PR 제목/브랜치에서 `[A-Z]+-\d+` 패턴 수동 탐색
+
+4. **INTENT_CONTEXT 구성**: 아래 질문에 답하며 컨텍스트 정리
+   - 어떤 문제를 해결하는가? (Jira 요약 + PR 제목)
+   - 합의된 범위는 무엇인가? (Jira 설명 / AC)
+   - 의도적인 설계 결정이 있는가? (PR 코멘트, 커밋 메시지)
+
+5. **이 컨텍스트를 다음에 활용**:
+   - "변경 요약" 섹션을 정확하게 작성
+   - 의도적인 설계 결정을 이슈로 오인하지 않도록 판단
+   - Jira AC와 실제 구현 범위 일치 여부 확인
+
+---
+
 ### Step 3: 코드 분석 & 리뷰 작성
 
 1. diff 전체를 읽고 [reference.md](reference.md)의 **10가지 백엔드 전문 관점**으로 분석합니다.

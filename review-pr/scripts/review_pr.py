@@ -3,9 +3,10 @@
 Bitbucket PR Helper - PR 데이터 수집 및 코멘트 게시
 
 Usage:
-    python3 review_pr.py fetch <pr_url>       # PR 메타 + diff + commits → JSON stdout
+    python3 review_pr.py fetch <pr_url>       # PR 메타 + diff + commits + comments → JSON stdout
     python3 review_pr.py comment <pr_url>     # stdin으로 코멘트 내용 읽어서 PR에 게시
     python3 review_pr.py save <pr_url>        # PR 메타 정보만 출력 (파일명 생성용)
+    python3 review_pr.py jira <ticket_key>    # Jira 스토리 조회 → JSON stdout
 """
 
 import json
@@ -60,6 +61,95 @@ def get_env() -> Dict[str, str]:
                         if k.startswith(('BITBUCKET_', 'JIRA_'))})
         _env_cache = file_env
     return _env_cache
+
+
+def extract_jira_key(text: str) -> Optional[str]:
+    """PR 제목, 브랜치명, 설명에서 Jira 티켓 키를 추출합니다.
+
+    지원 패턴: OQC-123, UNI-456, PLASMA-789 등 [A-Z]+-\\d+ 형식
+    """
+    match = re.search(r'\b([A-Z][A-Z0-9]+-\d+)\b', text)
+    return match.group(1) if match else None
+
+
+def jira_api(method: str, endpoint: str, **kwargs) -> Any:
+    """Jira REST API 요청을 실행합니다.
+
+    Required env vars: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN
+    """
+    import requests
+
+    env = get_env()
+    base_url = env.get('JIRA_BASE_URL', '').rstrip('/')
+    email = env.get('JIRA_EMAIL', '')
+    token = env.get('JIRA_API_TOKEN', '')
+
+    if not base_url or not email or not token:
+        raise ValueError("JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN required for Jira API")
+
+    url = f"{base_url}/rest/api/3{endpoint}"
+    try:
+        response = requests.request(method, url, auth=(email, token), timeout=15, **kwargs)
+        response.raise_for_status()
+        return response
+    except Exception as e:
+        raise RuntimeError(f"Jira API error: {e}") from e
+
+
+def fetch_jira_story(ticket_key: str) -> Dict[str, Any]:
+    """Jira 스토리 상세 정보를 조회합니다."""
+    resp = jira_api("GET", f"/issue/{ticket_key}", params={
+        'fields': 'summary,description,status,issuetype,priority,assignee,reporter,labels,comment,acceptance_criteria'
+    })
+    data = resp.json()
+    fields = data.get('fields', {})
+
+    # Description: Jira uses Atlassian Document Format (ADF) or plain text
+    description = fields.get('description') or ''
+    if isinstance(description, dict):
+        # ADF format — extract plain text from content blocks
+        description = _extract_adf_text(description)
+
+    # Comments (최신 5개)
+    comments_raw = fields.get('comment', {}).get('comments', [])[-5:]
+    comments = []
+    for c in comments_raw:
+        body = c.get('body', '')
+        if isinstance(body, dict):
+            body = _extract_adf_text(body)
+        comments.append({
+            'author': c.get('author', {}).get('displayName', ''),
+            'body': body[:500],
+            'created': c.get('created', ''),
+        })
+
+    return {
+        'key': data.get('key', ticket_key),
+        'url': f"{get_env().get('JIRA_BASE_URL', '').rstrip('/')}/browse/{ticket_key}",
+        'summary': fields.get('summary', ''),
+        'description': description[:2000] if description else '',
+        'status': fields.get('status', {}).get('name', ''),
+        'issue_type': fields.get('issuetype', {}).get('name', ''),
+        'priority': fields.get('priority', {}).get('name', ''),
+        'assignee': (fields.get('assignee') or {}).get('displayName', ''),
+        'reporter': (fields.get('reporter') or {}).get('displayName', ''),
+        'labels': fields.get('labels', []),
+        'comments': comments,
+    }
+
+
+def _extract_adf_text(node: Any) -> str:
+    """Atlassian Document Format (ADF) JSON을 평문으로 변환합니다."""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, dict):
+        if node.get('type') == 'text':
+            return node.get('text', '')
+        parts = []
+        for child in node.get('content', []):
+            parts.append(_extract_adf_text(child))
+        return '\n'.join(p for p in parts if p)
+    return ''
 
 
 def get_auth() -> Tuple[str, str]:
@@ -175,11 +265,34 @@ def fetch_pr(url: str) -> Dict[str, Any]:
         # target branch 커밋 조회 실패는 무시 (선택적 정보)
         pass
 
+    # PR 코멘트/리뷰 토론
+    pr_comments = []
+    try:
+        comments_resp = bb_api("GET", f"{base}/comments", params={'pagelen': 50})
+        for c in comments_resp.json().get('values', []):
+            pr_comments.append({
+                'author': c.get('author', {}).get('display_name', ''),
+                'content': c.get('content', {}).get('raw', '')[:500],
+                'created_on': c.get('created_on', ''),
+                'inline': c.get('inline'),  # 인라인 코멘트면 {path, line} 포함
+            })
+    except Exception:
+        pass
+
+    # Jira 티켓 키 추출 (제목, 브랜치, 설명 순서로 탐색)
+    jira_key = (
+        extract_jira_key(pr_meta['title']) or
+        extract_jira_key(pr_meta['source_branch']) or
+        extract_jira_key(pr_meta['description'])
+    )
+
     return {
         'pr': pr_meta,
         'commits': commits,
         'diff': diff_text,
         'target_branch_commits': target_commits,
+        'pr_comments': pr_comments,
+        'jira_key': jira_key,
     }
 
 
@@ -258,6 +371,20 @@ def main():
     elif command == 'save':
         result = save_info(pr_url)
         print(json.dumps(result, indent=2, ensure_ascii=False))
+
+    elif command == 'jira':
+        # pr_url argument doubles as ticket_key for this command
+        ticket_key = pr_url
+        try:
+            result = fetch_jira_story(ticket_key)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            print("Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN in env or .env file.", file=sys.stderr)
+            sys.exit(1)
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
