@@ -24,8 +24,12 @@ def _load_dotenv_fallback() -> Dict[str, str]:
     환경변수가 직접 설정된 경우 .env 파일 없이도 동작할 수 있습니다.
     """
     env = {}
+    # .env.attlasian 우선, .env 폴백
     possible_paths = [
-        Path.cwd() / '.env',                           # 현재 디렉토리 fallback
+        Path.home() / '.env.attlasian',                # 홈 디렉토리
+        Path.cwd() / '.env.attlasian',                 # 현재 디렉토리
+        Path.home() / 'cyanluna.dev' / '.env.attlasian',  # 프로젝트 루트
+        Path.cwd() / '.env',                           # .env 폴백
     ]
 
     env_file = None
