@@ -1,8 +1,26 @@
 ---
 name: kanban-run
-description: Run the AI team pipeline for kanban tasks — orchestration loop with 6 agents (Planner, Critic, Builder, Shield, Inspector, Ranger), single-step execution, and code review. Use /kanban-run to execute tasks through the 7-column pipeline.
+description: Run the AI team pipeline for kanban tasks — orchestration loop with 6 agents (Planner, Critic, Builder, Shield, Inspector, Ranger), single-step execution, and code review. Use /kanban-run to execute tasks through the 7-column pipeline. AUTO-TRIGGER when: user says "implement task NNN" or any task ID + implement/build/do combination; or user confirms with "yes/ok/go/do it" after Claude proposes implementing a specific kanban task.
 license: MIT
 ---
+
+## Auto-Trigger Rules
+
+**ALWAYS invoke this skill (without waiting for `/kanban-run`) when:**
+
+1. User mentions a kanban task ID and requests implementation:
+   - "implement task #NNN" / "build task NNN" / "do NNN" / "run NNN"
+   - Korean equivalents: "태스크 NNN 구현해줘" / "NNN 해줘" / "NNN 번 작업해줘"
+   - Any message pairing a task number with implement / build / work on / do
+
+2. Claude has proposed implementing a specific kanban task and the user confirms:
+   - Pattern: Claude says "Shall I implement task #NNN [title]?" → User replies "yes", "ok", "go", "do it", "응", "해줘", "그래", "ㅇㅇ"
+   - This confirmation **must** trigger `/kanban-run <ID>` automatically — do not implement manually
+
+3. User says "next task" / "continue" / "다음 태스크 해줘" when a task is in progress:
+   - Fetch board context first, identify next todo task, then run it
+
+**When auto-triggered**: extract task ID and call `/kanban-run <ID>` — never implement code manually and patch kanban state afterward.
 
 > Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 > Schema: read `../kanban/schema.md` for full DB schema, column descriptions, and JSON field formats.
