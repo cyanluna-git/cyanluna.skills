@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { neon } from "@neondatabase/serverless";
+import pg from "pg";
 import { createHash, timingSafeEqual } from "crypto";
 import path from "path";
 
@@ -180,12 +180,13 @@ function getSql() {
   if (!connectionString) {
     throw new Error("DATABASE_URL or NEON_DATABASE_URL is required");
   }
-  sqlClient = neon(connectionString);
+  sqlClient = new pg.Pool({ connectionString, max: 3, idleTimeoutMillis: 10000 });
   return sqlClient;
 }
 
 async function q(sql, text, params = []) {
-  return (await sql.query(text, params));
+  const result = await sql.query(text, params);
+  return result.rows;
 }
 
 function parseJsonArray(raw) {
@@ -304,7 +305,7 @@ function sortBoardGroup(status, tasks) {
     });
   }
   return sorted.sort((a, b) =>
-    Number(a.rank || 0) - Number(b.rank || 0) || Number(a.id || 0) - Number(b.id || 0)
+    Number(b.rank || 0) - Number(a.rank || 0) || Number(b.id || 0) - Number(a.id || 0)
   );
 }
 
@@ -363,6 +364,7 @@ async function initializeSchema(sql) {
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS decision_log TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS brief TEXT`,
   ];
   for (const statement of migrations) {
     await sql.query(statement);
@@ -388,6 +390,31 @@ async function initializeSchema(sql) {
   await sql.query(`UPDATE tasks SET priority = 'low' WHERE priority = '낮음'`);
   await sql.query(`UPDATE tasks SET status = 'impl' WHERE status = 'inprogress'`);
   await sql.query(`UPDATE tasks SET status = 'impl_review' WHERE status = 'review'`);
+
+  // ── projects + project_links tables ──
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      purpose TEXT,
+      stack TEXT,
+      brief TEXT,
+      status TEXT DEFAULT 'active',
+      category TEXT,
+      repo_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS project_links (
+      source_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      target_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      relation TEXT NOT NULL,
+      PRIMARY KEY (source_id, target_id, relation)
+    )
+  `);
 }
 
 async function ensureSchema(sql) {
@@ -412,18 +439,18 @@ async function renumberRanks(sql, project, status) {
 }
 
 function r2Bucket() {
-  return process.env.CLOUDFLARE_R2_BUCKET_NAME || "cyanluna-kanban-images";
+  return (process.env.CLOUDFLARE_R2_BUCKET_NAME || "cyanluna-kanban-images").trim();
 }
 
 function r2PublicUrl() {
-  return String(process.env.CLOUDFLARE_R2_PUBLIC_URL || "").replace(/\/$/, "");
+  return String(process.env.CLOUDFLARE_R2_PUBLIC_URL || "").trim().replace(/\/$/, "");
 }
 
 function getR2() {
   if (r2Client) return r2Client;
-  const endpoint = process.env.CLOUDFLARE_R2_ENDPOINT;
-  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
+  const endpoint = process.env.CLOUDFLARE_R2_ENDPOINT?.trim();
+  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY?.trim();
   if (!endpoint || !accessKeyId || !secretAccessKey) {
     throw new Error("Cloudflare R2 env vars missing");
   }
@@ -614,9 +641,9 @@ export default async function handler(req, res) {
       let tasks;
       if (projectParam) {
         const safe = sanitizeProject(projectParam);
-        tasks = await q(sql, `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank, id`, [safe]);
+        tasks = await q(sql, `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank DESC, id DESC`, [safe]);
       } else {
-        tasks = await q(sql, `SELECT ${fields} FROM tasks ORDER BY rank, id`);
+        tasks = await q(sql, `SELECT ${fields} FROM tasks ORDER BY rank DESC, id DESC`);
       }
 
       const boardTasks = summary ? tasks.map(summarizeBoardTask) : tasks;
@@ -835,19 +862,18 @@ export default async function handler(req, res) {
           }
         }
       } else if (afterId) {
+        // afterId = visually above = higher rank in DESC order
+        // Drop at bottom: need rank LOWER than afterId
         const [above] = await q(sql, "SELECT rank FROM tasks WHERE id = $1", [afterId]);
-        newRank = above ? above.rank + 1000 : 1000;
+        if (above) {
+          newRank = above.rank - 1000;
+        }
       } else if (beforeId) {
+        // beforeId = visually below = lower rank in DESC order
+        // Drop at top: need rank HIGHER than beforeId
         const [below] = await q(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
-        if (below) {
-          newRank = Math.floor(below.rank / 2);
-          if (newRank === 0) {
-            await renumberRanks(sql, task.project, targetStatus);
-            const [newBelow] = await q(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
-            newRank = Math.floor(newBelow.rank / 2);
-          }
-        }
-        }
+        newRank = below ? below.rank + 1000 : 1000;
+      }
 
       await sql.query("UPDATE tasks SET rank = $1, updated_at = NOW() WHERE id = $2", [newRank, id]);
       json(res, 200, { success: true, rank: newRank });
@@ -868,7 +894,7 @@ export default async function handler(req, res) {
       const level = body.level !== undefined ? Number.parseInt(body.level, 10) || 3 : 3;
 
       const [maxRow] = await q(sql, "SELECT MAX(rank) AS maxrank FROM tasks WHERE project = $1 AND status = 'todo'", [safe]);
-      const rank = (maxRow?.maxrank ?? 0) + 1000;
+      const rank = (maxRow?.maxrank ?? 0) + 1;
       const [row] = await q(sql, `
         INSERT INTO tasks (project, title, priority, description, tags, rank, level)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -1121,6 +1147,151 @@ export default async function handler(req, res) {
       res.setHeader("Location", `${r2PublicUrl()}/${safeName}`);
       res.end();
       return;
+    }
+
+    // ── Projects API ──────────────────────────────────────────────────────────
+
+    // GET /api/projects — List all with links
+    if (pathname === "/api/projects" && req.method === "GET") {
+      const rows = await q(sql, `
+        SELECT p.*,
+          COALESCE(json_agg(json_build_object(
+            'source_id', pl.source_id, 'target_id', pl.target_id, 'relation', pl.relation
+          )) FILTER (WHERE pl.source_id IS NOT NULL), '[]') AS links
+        FROM projects p
+        LEFT JOIN project_links pl ON p.id = pl.source_id OR p.id = pl.target_id
+        GROUP BY p.id
+        ORDER BY p.category, p.name
+      `);
+      json(res, 200, { projects: rows });
+      return;
+    }
+
+    // POST /api/projects — Create/Upsert
+    if (pathname === "/api/projects" && req.method === "POST") {
+      const body = await parseBody(req);
+      if (!body.id || !body.name) {
+        json(res, 400, { error: "id and name are required" });
+        return;
+      }
+      const [row] = await q(sql, `
+        INSERT INTO projects (id, name, purpose, stack, brief, status, category, repo_url)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          purpose = COALESCE(EXCLUDED.purpose, projects.purpose),
+          stack = COALESCE(EXCLUDED.stack, projects.stack),
+          brief = COALESCE(EXCLUDED.brief, projects.brief),
+          status = COALESCE(EXCLUDED.status, projects.status),
+          category = COALESCE(EXCLUDED.category, projects.category),
+          repo_url = COALESCE(EXCLUDED.repo_url, projects.repo_url),
+          updated_at = NOW()
+        RETURNING *
+      `, [body.id, body.name, body.purpose || null, body.stack || null, body.brief || null, body.status || 'active', body.category || null, body.repo_url || null]);
+      json(res, 200, { success: true, project: row });
+      return;
+    }
+
+    // /api/projects/:id routes
+    const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+    if (projectMatch) {
+      const projectId = decodeURIComponent(projectMatch[1]);
+
+      // GET /api/projects/:id — Single project with task stats
+      if (req.method === "GET") {
+        const [project] = await q(sql, "SELECT * FROM projects WHERE id = $1", [projectId]);
+        if (!project) {
+          json(res, 404, { error: "Project not found" });
+          return;
+        }
+        const taskCounts = await q(sql, "SELECT status, COUNT(*)::int AS count FROM tasks WHERE project = $1 GROUP BY status", [projectId]);
+        const links = await q(sql, "SELECT * FROM project_links WHERE source_id = $1 OR target_id = $1", [projectId]);
+        const counts = {};
+        for (const row of taskCounts) {
+          counts[row.status] = row.count;
+        }
+        json(res, 200, { ...project, task_counts: counts, links });
+        return;
+      }
+
+      // PATCH /api/projects/:id — Update
+      if (req.method === "PATCH") {
+        const body = await parseBody(req);
+        const sets = [];
+        const values = [];
+        let position = 1;
+        const assign = (field, value) => {
+          if (value === undefined) return;
+          sets.push(`${field} = $${position++}`);
+          values.push(value);
+        };
+        assign("name", body.name);
+        assign("purpose", body.purpose);
+        assign("stack", body.stack);
+        assign("brief", body.brief);
+        assign("status", body.status);
+        assign("category", body.category);
+        assign("repo_url", body.repo_url);
+        if (sets.length === 0) {
+          json(res, 400, { error: "No fields to update" });
+          return;
+        }
+        sets.push("updated_at = NOW()");
+        values.push(projectId);
+        await sql.query(`UPDATE projects SET ${sets.join(", ")} WHERE id = $${position}`, values);
+        json(res, 200, { success: true });
+        return;
+      }
+
+      // DELETE /api/projects/:id
+      if (req.method === "DELETE") {
+        await sql.query("DELETE FROM projects WHERE id = $1", [projectId]);
+        json(res, 200, { success: true });
+        return;
+      }
+    }
+
+    // /api/projects/:id/links routes
+    const projectLinksMatch = pathname.match(/^\/api\/projects\/([^/]+)\/links$/);
+    if (projectLinksMatch) {
+      const projectId = decodeURIComponent(projectLinksMatch[1]);
+
+      // GET /api/projects/:id/links
+      if (req.method === "GET") {
+        const links = await q(sql, "SELECT * FROM project_links WHERE source_id = $1 OR target_id = $1", [projectId]);
+        json(res, 200, { links });
+        return;
+      }
+
+      // POST /api/projects/:id/links
+      if (req.method === "POST") {
+        const body = await parseBody(req);
+        if (!body.target_id || !body.relation) {
+          json(res, 400, { error: "target_id and relation are required" });
+          return;
+        }
+        await sql.query(
+          "INSERT INTO project_links (source_id, target_id, relation) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+          [projectId, body.target_id, body.relation]
+        );
+        json(res, 200, { success: true });
+        return;
+      }
+
+      // DELETE /api/projects/:id/links
+      if (req.method === "DELETE") {
+        const body = await parseBody(req);
+        if (!body.target_id || !body.relation) {
+          json(res, 400, { error: "target_id and relation are required" });
+          return;
+        }
+        await sql.query(
+          "DELETE FROM project_links WHERE source_id = $1 AND target_id = $2 AND relation = $3",
+          [projectId, body.target_id, body.relation]
+        );
+        json(res, 200, { success: true });
+        return;
+      }
     }
 
     json(res, 404, { error: "Not found" });

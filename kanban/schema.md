@@ -118,6 +118,7 @@ This makes every card field self-documenting — you can see at a glance who wro
 
 ### agent_log
 Every entry must include `agent` (nickname), `model`, `message`, and `timestamp`.
+Optional: `"tokens"?: number` — estimated total tokens (input + output) consumed by the agent for this step.
 
 ```json
 [
@@ -125,22 +126,29 @@ Every entry must include `agent` (nickname), `model`, `message`, and `timestamp`
     "agent": "Planner",
     "model": "<MODEL_PLANNER>",
     "message": "Plan complete. 4 files to modify, 2 new components.",
+    "tokens": 12000,
     "timestamp": "2026-02-20T10:05:00.000Z"
   },
   {
     "agent": "Critic",
     "model": "<MODEL_CRITIC>",
     "message": "Plan approved. No major issues.",
+    "tokens": 8000,
     "timestamp": "2026-02-20T10:10:00.000Z"
   },
   {
     "agent": "Builder",
     "model": "<MODEL_BUILDER>",
     "message": "Implementation complete. All files modified per plan.",
+    "tokens": 25000,
     "timestamp": "2026-02-20T11:00:00.000Z"
   }
 ]
 ```
+
+**Token Estimation Guide**: Agents estimate their own usage based on context size + output length.
+Example: context ~8k input + ~2k output → `"tokens": 10000`
+If unknown or uncertain, omit the field — missing tokens count as 0 in stats.
 
 ## Appending to agent_log (orchestrator)
 
@@ -155,6 +163,7 @@ log.append({
   'agent': 'NICKNAME',
   'model': 'MODEL',
   'message': 'MESSAGE',
+  'tokens': TOKENS,  # optional: estimated input+output tokens, omit if unknown
   'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'
 })
 subprocess.run(['curl','-s',*auth_header,'-X','PATCH',f'{base_url}/api/task/{task_id}?project={project}','-H','Content-Type: application/json','-d',json.dumps({'agent_log':json.dumps(log)})], capture_output=True)
@@ -162,6 +171,51 @@ subprocess.run(['curl','-s',*auth_header,'-X','PATCH',f'{base_url}/api/task/{tas
 ```
 
 Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
+
+## Table: projects
+
+```sql
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  purpose TEXT,
+  stack TEXT,
+  brief TEXT,
+  status TEXT DEFAULT 'active',
+  category TEXT,
+  repo_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT | Project identifier (matches kanban.json `project` field) |
+| `name` | TEXT | Display name (often same as id) |
+| `purpose` | TEXT | WHY this project exists — used for AI context docking |
+| `stack` | TEXT | Technologies / frameworks used |
+| `brief` | TEXT | Compressed project context: current state + direction + recent decisions. Injected into agent prompts for low-token-cost project awareness |
+| `status` | TEXT | `active` / `archived` / `paused` |
+| `category` | TEXT | Grouping: `edwards`, `personal`, `tools`, `skills`, `community` |
+| `repo_url` | TEXT | Git remote URL |
+
+## Table: project_links
+
+```sql
+CREATE TABLE IF NOT EXISTS project_links (
+  source_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  target_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  relation TEXT NOT NULL,
+  PRIMARY KEY (source_id, target_id, relation)
+);
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_id` | TEXT | Source project ID (FK to projects) |
+| `target_id` | TEXT | Target project ID (FK to projects) |
+| `relation` | TEXT | Relationship type: `extends`, `serves`, `depends_on`, `shares_data` |
 
 ## Schema Migrations
 

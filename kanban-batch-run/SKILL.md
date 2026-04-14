@@ -12,7 +12,17 @@ Default loop per task:
 refine(N) → implement(N) → verify(N) → refine(N+1) → implement(N+1) → ...
 ```
 
-This skill is an orchestrator, not a shortcut. Every implement step hands off to `kanban-run` via the Skill tool. Every refine step hands off to `kanban-refine` via the Skill tool.
+This skill is an orchestrator, not a shortcut. Every implement step hands off to `kanban-run`. Every refine step hands off to `kanban-refine`.
+
+## Codex Invocation Rule
+
+When running inside Codex, if a dedicated Skill tool is not available, invoke the inner runners by issuing slash command text directly:
+
+- `$kanban-run <ID>` / `$kanban-run <ID> --auto`
+- `$kanban-refine <ID>`
+
+Treat these as the Codex-native equivalent of `Skill(skill="kanban-run", ...)` and `Skill(skill="kanban-refine", ...)`.
+Do not re-implement either pipeline manually when this command path is available.
 
 ---
 
@@ -37,7 +47,9 @@ Resume a stopped batch from the given task ID. Skips all tasks before `<start-ID
 - Accept task selectors: `500-504`, `500~504`, `500,501,504`, or whitespace-separated IDs.
 - Reverse ranges like `504-500` are normalized to ascending order.
 - Read `../kanban/shared.md` before any API call.
-- Invoke `kanban-run` and `kanban-refine` for each task via the Skill tool — never re-implement their logic.
+- Invoke `kanban-run` and `kanban-refine` for each task via the Skill tool when available.
+- In Codex environments without the Skill tool, invoke via `$kanban-run ...` / `$kanban-refine ...` directly.
+- Do not emulate or re-implement either pipeline.
 
 ## Resources
 
@@ -96,7 +108,7 @@ Read the returned task list and proposed groups.
   - Titles/tags/descriptions point to distinct modules or surfaces
   - Failure in one would not invalidate another's work
 - If any doubt remains, stay sequential.
-- **Rolling wave + parallel**: run refine steps for a parallel group concurrently (multiple `kanban-refine` calls), then implement concurrently. Verify sequentially.
+- **Rolling wave + parallel**: run refine steps for a parallel group concurrently, then implement concurrently. Verify sequentially.
 
 ### 6. Execute — Rolling Wave Loop (default)
 
@@ -104,64 +116,66 @@ For each task N in order:
 
 ```
 A. Refine(N)
-   - Invoke: Skill(skill="kanban-refine", args="<ID>")
-   - kanban-refine will auto-detect the prior card (N-1) via "Depends on:" tags or ask one question.
-   - It reads N-1's implementation_notes + actual codebase to ground N's description.
-   - For the first task in the batch (no prior card): kanban-refine does a regular user interview.
+   - Skill(skill="kanban-refine", args="<ID>")  [Codex: $kanban-refine <ID>]
+   - kanban-refine auto-detects the prior card (N-1) via "Depends on:" tags or asks one question.
+   - Reads N-1's implementation_notes + actual codebase to ground N's description.
+   - First task in the batch (no prior card): regular user interview.
 
-   Card split check (run before invoking kanban-refine):
-   - Read current task description briefly.
-   - If scope obviously exceeds limits (AC > 5, files > 5, multi-layer), split the card first:
+   Card split check (before invoking kanban-refine):
+   - If scope exceeds limits (AC > 5, files > 5, multi-layer), split first:
      1. Create sub-cards via kanban API
-     2. Replace N in the execution order with N-a, N-b, N-c
+     2. Replace N in execution order with N-a, N-b, N-c
      3. Report split to user, continue automatically
 
 B. Implement(N)
-   - Invoke kanban-run via Skill tool (level-aware, see Inner Task Contract)
+   - Invoke kanban-run (level-aware, see Inner Task Contract)
 
 C. Verify(N)
    - Check actual implementation: git diff, created/modified files, test results
-   - Add kanban note summarizing what was confirmed:
-     curl POST /api/task/$ID/note → "Verified: [interface/schema/component confirmed]"
+   - Add kanban note: curl POST /api/task/$ID/note → "Verified: [confirmed interface/schema]"
    - Note anything that will affect N+1's refinement scope
 
 → Move to N+1
 ```
 
 **Loop exceptions:**
-- Refine produces a scope that triggers a split → insert sub-cards, continue
-- Implement hits a circuit breaker or blocker → stop batch, report with resume point
-- Verify reveals unexpected design change → update downstream task descriptions before continuing; report to user
+- Split triggered during Refine → insert sub-cards, continue
+- Circuit breaker or blocker during Implement → stop, report resume point
+- Unexpected design change during Verify → update downstream task descriptions; report to user
 
 ### 6b. Execute — Big Bang mode (`--big-bang`)
 
-For each task or group: invoke `kanban-run` directly. No refine or verify steps.
+Invoke `kanban-run` directly per task. No refine or verify steps.
 Use only when all tasks were fully refined before the batch started.
 
-**Sequential group**: invoke Skill tool for each task in order.
+**Sequential**: invoke for each task in order.
 
-**Parallel group**: invoke Skill tool for all tasks concurrently (single message, multiple Skill calls). After group completes:
+**Parallel**: invoke for all tasks in the group concurrently.
+- Claude: multiple Skill tool calls in one message.
+- Codex: multiple `$kanban-run ...` only if runtime supports concurrent execution; otherwise sequential.
+
+After parallel group:
 ```bash
 git status --porcelain
-git diff --check  # detect conflict markers
+git diff --check
 ```
-If conflict markers found: stop and report which tasks conflicted.
+If conflict markers found: stop, report which tasks conflicted.
 
-**After each task or group**: re-read task status from API before continuing.
+After each task or group: re-read task status from API before continuing.
 
 ### 7. Stop conditions
 
 - Requirement ambiguity requiring user input
 - Repeated review/test failure (circuit breaker inside `kanban-run`)
 - Conflicting code changes between parallel tasks
-- A task exits the normal path and needs a product decision
-- Parallel group partial failure: wait for all in-progress tasks to finish, then stop. Report succeeded vs. failed.
+- Task exits normal path and needs a product decision
+- Parallel group partial failure: wait for in-progress tasks to finish, then stop. Report succeeded vs. failed.
 
 ### 8. Early stop summary
 
 - Completed task IDs
 - Current blocker and which task caused it
-- Exact resume point: `Resume with: /kanban-batch-run resume <next-ID>`
+- Resume point: `Resume with: /kanban-batch-run resume <next-ID>`
 
 ### 9. Completion summary
 
@@ -172,23 +186,35 @@ If conflict markers found: stop and report which tasks conflicted.
 
 ---
 
+## Execution Notes
+
+- Be conservative. This skill is for throughput, not shortcuts.
+- Never implement a task freehand and patch kanban state afterward — drive every task through `kanban-run`.
+- Treat shared routes, server loaders, types, and top-level navigation as dependency hotspots — keep sequential.
+- Re-check the worktree between tasks.
+- Only parallelize when the batch planner can justify it in one sentence.
+- Rolling wave adds refine+verify overhead per task, but prevents rework from stale assumptions — net faster for epics with inter-task dependencies.
+
+---
+
 ## Inner Task Contract
 
 ### Refine invocation
 
 ```
-Skill(skill="kanban-refine", args="<ID>")
+Skill(skill="kanban-refine", args="<ID>")   # Claude
+$kanban-refine <ID>                          # Codex fallback
 ```
 
 kanban-refine handles prior context detection internally. No extra args needed.
 
 ### Implement invocation (level-aware)
 
-| Level | Default mode | `--auto` flag |
-|-------|-------------|---------------|
-| L1 | `Skill(skill="kanban-run", args="<ID> --auto")` | same |
-| L2 | `Skill(skill="kanban-run", args="<ID>")` | `Skill(skill="kanban-run", args="<ID> --auto")` |
-| L3 | `Skill(skill="kanban-run", args="<ID>")` | `Skill(skill="kanban-run", args="<ID> --auto")` |
+| Level | Claude default | Claude `--auto` | Codex default | Codex `--auto` |
+|-------|---------------|-----------------|---------------|----------------|
+| L1 | `Skill("kanban-run", "<ID> --auto")` | same | `$kanban-run <ID> --auto` | same |
+| L2 | `Skill("kanban-run", "<ID>")` | `Skill("kanban-run", "<ID> --auto")` | `$kanban-run <ID>` | `$kanban-run <ID> --auto` |
+| L3 | `Skill("kanban-run", "<ID>")` | `Skill("kanban-run", "<ID> --auto")` | `$kanban-run <ID>` | `$kanban-run <ID> --auto` |
 
 In default mode, L2/L3 tasks pause for user confirmation at review checkpoints.
 
@@ -206,33 +232,19 @@ STATUS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fi
 
 ### Rules
 
-- Never re-implement `kanban-run` or `kanban-refine` logic. Always invoke via Skill tool.
-- Never skip the Refine step in rolling wave mode, even if the task description looks complete — prior implementation context may change the scope.
-- If a task blocks, the status check surfaces it — stop and report the exact resume task.
-- For parallel groups, issue multiple Skill calls in a single message.
-
----
-
-## Execution Notes
-
-- Be conservative. This skill is for throughput, not shortcuts.
-- Treat shared routes, server loaders, types, and top-level navigation as dependency hotspots — keep those sequential.
-- Re-check the worktree between tasks. File changes from one task are expected to affect the next in a sequential chain.
-- Only parallelize when the batch planner can justify it in one sentence.
-- Rolling wave adds refine+verify overhead per task, but prevents rework from stale assumptions — net faster for epics with inter-task dependencies.
+- Never re-implement `kanban-run` or `kanban-refine`. Always invoke via Skill tool or Codex `$` command fallback.
+- Never skip Refine in rolling wave mode — prior implementation context may change scope.
+- If a task blocks, status check surfaces it — stop and report exact resume task.
+- For parallel groups, issue multiple invocations in a single message.
 
 ---
 
 ## Output Style
 
 Start with the resolved plan:
-- Ordered task list
-- Proposed grouping (sequential vs parallel)
-- Mode: Rolling Wave or Big Bang
-- One-line reason per group
-- Skipped tasks (if any)
+- Ordered task list, proposed grouping, mode (Rolling Wave or Big Bang), one-line reason per group, skipped tasks
 
-During execution, print per-task progress:
+During execution:
 ```
 Refine  #201 — scope locked (prior: POST /api/items interface confirmed)
 Impl    #201 — done (commit: a1b2c3)

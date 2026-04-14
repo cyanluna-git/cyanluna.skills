@@ -9,12 +9,18 @@ Sign all your work with: `> **Inspector** \`<MODEL_INSPECTOR>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Requirements: <description>
 - Plan (by Planner): <plan>
 - Done When (by Planner): <done_when>
 - Implementation Notes (by Builder + Shield): <implementation_notes>
+
+## Dependency Context
+<dependencies_context>
 
 ## Your Job
 
@@ -68,8 +74,10 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/<ID>/review?project=<PRO
     "model": "<MODEL_INSPECTOR>",
     "status": "approved",
     "comment": "> **Inspector** `<MODEL_INSPECTOR>` · <TIMESTAMP>\n\n<REVIEW_MARKDOWN>",
+    "tokens": <ESTIMATED_TOKENS>,
     "timestamp": "<TIMESTAMP>"
   }'
+# "tokens" is optional: estimated input+output tokens. Omit if unknown.
 ```
 
 `status` must be exactly `"approved"` or `"changes_requested"`.

@@ -7,6 +7,8 @@ interface Task {
   status: string;
   priority: string;
   rank: number;
+  card_type?: string;
+  epic_id?: number | null;
   description?: string | null;
   plan: string | null;
   implementation_notes: string | null;
@@ -40,6 +42,7 @@ interface Board {
   updated_at?: string | null;
   total?: number;
   counts?: Partial<Record<ColumnKey, number>>;
+  epics?: Task[];
   todo: Task[];
   plan: Task[];
   plan_review: Task[];
@@ -81,8 +84,8 @@ const AUTH_STORAGE_KEY = "kanban-auth-token";
 const VIEW_STORAGE_KEY = "kanban-current-view";
 const MOBILE_BOARD_COLUMNS_KEY = "kanban-mobile-board-columns";
 const BOARD_VERSION_POLL_MS = 30000;
-const BOARD_TODO_LIMIT = 10;
-const BOARD_DONE_LIMIT = 10;
+const BOARD_TODO_LIMIT = 50;
+const BOARD_DONE_LIMIT = 50;
 const SUMMARY_CACHE_PREFIX = "kanban-summary-cache";
 const SUMMARY_TTL_MS: Record<SummaryMode, number> = {
   board: 30_000,
@@ -133,6 +136,11 @@ function readStoredMobileBoardColumns(): Set<string> {
 }
 
 let currentProject: string | null = localStorage.getItem('kanban-project');
+let currentCategory: string | null = localStorage.getItem('kanban-category');
+let allProjects: string[] = [];
+const projectCategoryMap = new Map<string, string>();
+const projectNameMap = new Map<string, string>();
+let categoriesFetched = false;
 let isDragging = false;
 let isMobileViewport = MOBILE_MEDIA_QUERY.matches;
 let currentView: "board" | "list" | "chronicle" = isView(localStorage.getItem(VIEW_STORAGE_KEY))
@@ -153,6 +161,239 @@ let currentBoardVersionEtag: string | null = null;
 const summaryBoardCache = new Map<string, Board>();
 const summaryBoardEtagCache = new Map<string, string>();
 const summaryRevalidation = new Map<string, Promise<void>>();
+let sidebarObserver: IntersectionObserver | null = null;
+let currentEpics: Task[] = [];
+const VALID_STAGES = new Set(['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']);
+const hiddenStages = new Set<string>(
+  (JSON.parse(localStorage.getItem('kanban-hidden-stages') || '[]') as string[])
+    .filter(s => VALID_STAGES.has(s))
+);
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function debounce<A extends string[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
+  let timer: ReturnType<typeof setTimeout>;
+  return (...args: A) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+function setActiveSidebarItem(stage: string): void {
+  document.querySelectorAll<HTMLElement>('.sidebar-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.stage === stage);
+  });
+}
+
+function bindSidebarItems(sidebar: HTMLElement): void {
+  sidebar.querySelectorAll<HTMLElement>('.sidebar-item[data-stage]').forEach(item => {
+    const fresh = item.cloneNode(true) as HTMLElement;
+    item.parentNode?.replaceChild(fresh, item);
+    const activate = () => {
+      const stage = fresh.dataset.stage!;
+      setActiveSidebarItem(stage);
+      document.querySelector<HTMLElement>(`.column[data-column="${stage}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+    };
+    fresh.addEventListener('click', activate);
+    fresh.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+    });
+  });
+}
+
+function bindCollapseToggle(sidebar: HTMLElement): void {
+  const btn = document.getElementById('sidebar-collapse-btn');
+  if (!btn) return;
+  const fresh = btn.cloneNode(true) as HTMLButtonElement;
+  btn.parentNode?.replaceChild(fresh, btn);
+  fresh.addEventListener('click', () => {
+    const collapsed = sidebar.toggleAttribute('data-collapsed');
+    localStorage.setItem('kanban-sidebar-collapsed', String(collapsed));
+    fresh.textContent = collapsed ? '›' : '‹';
+  });
+  fresh.textContent = sidebar.hasAttribute('data-collapsed') ? '›' : '‹';
+}
+
+function initIntersectionObserver(): void {
+  if (sidebarObserver) {
+    sidebarObserver.disconnect();
+    sidebarObserver = null;
+  }
+  const board = document.querySelector<HTMLElement>('main#board');
+  if (!board) return;
+
+  const debouncedUpdate = debounce((stage: string) => setActiveSidebarItem(stage), 100);
+
+  sidebarObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          const stage = (entry.target as HTMLElement).dataset.column;
+          if (stage) debouncedUpdate(stage);
+          break;
+        }
+      }
+    },
+    { root: board, threshold: 0.5, rootMargin: '0px' }
+  );
+
+  document.querySelectorAll<HTMLElement>('.column[data-column]').forEach(col => {
+    sidebarObserver!.observe(col);
+  });
+
+  requestAnimationFrame(() => {
+    const first = document.querySelector<HTMLElement>('.column[data-column]');
+    if (first?.dataset.column) setActiveSidebarItem(first.dataset.column);
+  });
+}
+
+function applyHiddenStages(): void {
+  hiddenStages.forEach(stage => {
+    const col = document.querySelector<HTMLElement>(`[data-column="${stage}"]`);
+    if (col) col.style.display = 'none';
+    document.querySelector<HTMLElement>(`.sidebar-item[data-stage="${stage}"]`)
+      ?.classList.add('hidden-stage');
+  });
+  updateShowAllBtn();
+  updateHiddenCountIndicator();
+}
+
+function updateShowAllBtn(): void {
+  const btn = document.getElementById('sidebar-show-all') as HTMLButtonElement | null;
+  if (btn) btn.style.display = hiddenStages.size > 0 ? '' : 'none';
+}
+
+function updateHiddenCountIndicator(): void {
+  const el = document.getElementById('hidden-stage-count');
+  if (!el) return;
+  el.textContent = hiddenStages.size > 0 ? `\u00b7 ${hiddenStages.size} hidden` : '';
+}
+
+function updateSidebarBadges(): void {
+  document.querySelectorAll<HTMLElement>('.sidebar-item[data-stage]').forEach(item => {
+    const stage = item.dataset.stage!;
+    const countEl = document.querySelector<HTMLElement>(`[data-column="${stage}"] .count`);
+    const badge = item.querySelector<HTMLElement>('.sidebar-badge');
+    if (!badge) return;
+    const count = countEl?.textContent?.trim() ?? '0';
+    badge.textContent = count;
+    badge.dataset.count = count;
+  });
+}
+
+function toggleStageVisibility(stage: string): void {
+  const col = document.querySelector<HTMLElement>(`[data-column="${stage}"]`);
+  const item = document.querySelector<HTMLElement>(`.sidebar-item[data-stage="${stage}"]`);
+  if (hiddenStages.has(stage)) {
+    hiddenStages.delete(stage);
+    if (col) col.style.display = '';
+    item?.classList.remove('hidden-stage');
+  } else {
+    hiddenStages.add(stage);
+    if (col) col.style.display = 'none';
+    item?.classList.add('hidden-stage');
+  }
+  localStorage.setItem('kanban-hidden-stages', JSON.stringify([...hiddenStages]));
+  updateShowAllBtn();
+  updateHiddenCountIndicator();
+}
+
+function showAllStages(): void {
+  hiddenStages.forEach(stage => {
+    const col = document.querySelector<HTMLElement>(`[data-column="${stage}"]`);
+    if (col) col.style.display = '';
+    document.querySelector<HTMLElement>(`.sidebar-item[data-stage="${stage}"]`)
+      ?.classList.remove('hidden-stage');
+  });
+  hiddenStages.clear();
+  localStorage.removeItem('kanban-hidden-stages');
+  updateShowAllBtn();
+  updateHiddenCountIndicator();
+}
+
+function bindEyeButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>('.sidebar-eye-btn').forEach(btn => {
+    const fresh = btn.cloneNode(true) as HTMLButtonElement;
+    btn.parentNode?.replaceChild(fresh, btn);
+    fresh.addEventListener('click', (e: MouseEvent) => {
+      e.stopPropagation();
+      const stage = (fresh.closest<HTMLElement>('.sidebar-item[data-stage]'))?.dataset.stage;
+      if (stage) toggleStageVisibility(stage);
+    });
+  });
+}
+
+function bindShowAllButton(): void {
+  const showAllBtn = document.getElementById('sidebar-show-all');
+  if (showAllBtn) {
+    const fresh = showAllBtn.cloneNode(true) as HTMLButtonElement;
+    showAllBtn.parentNode?.replaceChild(fresh, showAllBtn);
+    fresh.addEventListener('click', showAllStages);
+  }
+}
+
+function renderSidebarProjects(): void {
+  const container = document.querySelector<HTMLElement>('.sidebar-projects');
+  if (!container) return;
+
+  const projects = allProjects;
+  const filtered = currentCategory
+    ? projects.filter(p => projectCategoryMap.get(p) === currentCategory)
+    : projects;
+
+  const items = filtered.map(p => {
+    const isActive = currentProject === p;
+    const displayName = escapeHtml(projectNameMap.get(p) || p);
+    return `<div role="button" tabindex="0" class="sidebar-item sidebar-project-item${isActive ? ' active' : ''}" data-project-id="${escapeHtml(p)}">
+      <span class="sidebar-icon">📁</span>
+      <span class="sidebar-label">${displayName}</span>
+    </div>`;
+  });
+
+  const allActive = currentProject === null;
+  container.innerHTML = `<div class="sidebar-section-label">Projects</div>`
+    + `<div role="button" tabindex="0" class="sidebar-item sidebar-project-item${allActive ? ' active' : ''}" data-project-id="__all__">
+      <span class="sidebar-icon">\u{1F310}</span>
+      <span class="sidebar-label">All Projects</span>
+    </div>`
+    + items.join('');
+
+  container.querySelectorAll<HTMLElement>('.sidebar-project-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const pid = item.dataset.projectId!;
+      currentProject = pid === '__all__' ? null : pid;
+      if (currentProject) {
+        localStorage.setItem('kanban-project', currentProject);
+      } else {
+        localStorage.removeItem('kanban-project');
+      }
+      currentBoardVersion = null;
+      currentBoardVersionEtag = null;
+      renderProjectFilter(allProjects);
+      refreshCurrentView();
+    });
+    item.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); }
+    });
+  });
+}
+
+function initSidebar(): void {
+  const sidebar = document.querySelector<HTMLElement>('aside.sidebar');
+  if (!sidebar) return;
+  if (localStorage.getItem('kanban-sidebar-collapsed') === 'true') {
+    sidebar.setAttribute('data-collapsed', '');
+  }
+  bindSidebarItems(sidebar);
+  bindEyeButtons();
+  bindShowAllButton();
+  bindCollapseToggle(sidebar);
+  initIntersectionObserver();
+  renderSidebarProjects();
+}
 
 function setAuthMessage(message: string, tone: "default" | "error" | "success" = "default") {
   const messageEl = document.getElementById("auth-message")!;
@@ -440,7 +681,14 @@ async function readBoardVersion(projectOverride: string | null = currentProject)
 }
 
 function currentViewUsesSummaryMode(mode: SummaryMode): boolean {
-  return mode === "board" ? currentView === "board" : currentView === "list" || currentView === "chronicle";
+  if (mode === "board") {
+    return currentView === "board" && !shouldLoadExpandedBoardSummary();
+  }
+  return currentView === "list" || currentView === "chronicle" || (currentView === "board" && shouldLoadExpandedBoardSummary());
+}
+
+function shouldLoadExpandedBoardSummary(): boolean {
+  return currentSearch.trim().length > 0;
 }
 
 function revalidateSummaryCache(mode: SummaryMode, cacheKey: string, cachedVersion: string | null, projectOverride: string | null) {
@@ -688,14 +936,17 @@ function isOlderThan3Days(dateStr: string): boolean {
 
 function sortTasks(tasks: Task[], status?: string): Task[] {
   if (currentSort === 'default') {
+    if (status === 'todo') {
+      return [...tasks].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+    }
     if (status === 'done') {
       return [...tasks].sort((a, b) => {
         const completedOrder = (b.completed_at || '').localeCompare(a.completed_at || '');
         if (completedOrder !== 0) return completedOrder;
-        return a.rank - b.rank || a.id - b.id;
+        return b.id - a.id;
       });
     }
-    return tasks;
+    return [...tasks].sort((a, b) => b.rank - a.rank || b.id - a.id);
   }
   return [...tasks].sort((a, b) => {
     if (currentSort === 'created_asc')  return a.created_at.localeCompare(b.created_at);
@@ -818,7 +1069,7 @@ function parseJsonArray(raw: string | null | undefined): any[] {
   }
 }
 
-function renderCard(task: Task): string {
+function renderCard(task: Task, suppressStatus = false): string {
   const pClass = priorityClass(task.priority);
   const priorityBadge = pClass
     ? `<span class="badge ${pClass}">${task.priority}</span>`
@@ -835,9 +1086,14 @@ function renderCard(task: Task): string {
       ? `<span class="badge project">${task.project}</span>`
       : "";
 
-  // Status badge for pipeline stages
+  const epicParent = task.epic_id ? currentEpics.find(e => e.id === task.epic_id) : null;
+  const epicBadge = epicParent
+    ? `<span class="badge epic-badge" data-epic-id="${epicParent.id}" title="${escapeHtml(epicParent.title)}">📌 ${escapeHtml(epicParent.title.replace(/^\[Explore\]\s*/i, '').slice(0, 18))}${epicParent.title.replace(/^\[Explore\]\s*/i, '').length > 18 ? '…' : ''}</span>`
+    : '';
+
+  // Status badge for pipeline stages (suppressed when card is in its own column)
   const statusLabel = STATUS_BADGES[task.status];
-  const statusBadge = statusLabel
+  const statusBadge = (statusLabel && !suppressStatus)
     ? `<span class="badge status-${task.status}">${statusLabel}</span>`
     : "";
 
@@ -848,6 +1104,12 @@ function renderCard(task: Task): string {
   const agentBadge = task.current_agent
     ? `<span class="badge agent-tag">${task.current_agent}</span>`
     : "";
+
+  // Review cycle warning (> 2 combined review cycles = struggling task)
+  const reviewCycles = (task.plan_review_count || 0) + (task.impl_review_count || 0);
+  const cycleBadge = reviewCycles > 2
+    ? `<span class="badge cycle-warning" title="${reviewCycles} review cycles">↻${reviewCycles}</span>`
+    : '';
 
   // Review badge (impl_review)
   const reviewComments = task.last_review_status ? [] : parseJsonArray(task.review_comments);
@@ -905,11 +1167,13 @@ function renderCard(task: Task): string {
         ${priorityBadge}
         ${statusBadge}
         ${agentBadge}
+        ${cycleBadge}
         <button class="card-copy-btn" data-copy="#${task.id} ${task.title}" title="Copy to clipboard">⎘</button>
       </div>
       <div class="card-title">${task.title}</div>
       <div class="card-footer">
         ${projectBadge}
+        ${epicBadge}
         ${planReviewBadge}
         ${reviewBadge}
         ${notesBadge}
@@ -921,6 +1185,142 @@ function renderCard(task: Task): string {
   `;
 }
 
+const EPIC_SWIMLANE_COLLAPSED_KEY = 'kanban-epic-swimlane-collapsed';
+
+function renderEpicCard(epic: Task): string {
+  const statusLabel = epic.status === 'done' ? '✅' : epic.status === 'todo' ? '' : `<span class="badge status-${epic.status}">${epic.status}</span>`;
+  const dateBadge = epic.completed_at
+    ? `<span class="badge date">${epic.completed_at.slice(0, 10)}</span>`
+    : epic.created_at
+      ? `<span class="badge created">${timeAgo(epic.created_at)}</span>`
+      : '';
+  const projectBadge = !currentProject && epic.project
+    ? `<span class="badge project">${escapeHtml(epic.project)}</span>`
+    : '';
+  return `
+    <div class="epic-card" data-id="${epic.id}" data-project="${escapeHtml(epic.project)}" title="${escapeHtml(epic.title)}">
+      <div class="epic-card-header">
+        <span class="epic-card-icon">📌</span>
+        <span class="epic-card-id">#${epic.id}</span>
+        ${statusLabel}
+      </div>
+      <div class="epic-card-title">${escapeHtml(epic.title.replace(/^\[Explore\]\s*/i, ''))}</div>
+      <div class="epic-card-footer">
+        ${projectBadge}
+        ${dateBadge}
+      </div>
+    </div>
+  `;
+}
+
+function renderEpicSwimlane(epics: Task[]): void {
+  const existing = document.getElementById('epic-swimlane');
+  if (!epics || epics.length === 0) {
+    if (existing) existing.remove();
+    return;
+  }
+
+  const filtered = currentProject
+    ? epics.filter(e => e.project === currentProject)
+    : epics;
+
+  const isCollapsed = localStorage.getItem(EPIC_SWIMLANE_COLLAPSED_KEY) === 'true';
+  const html = `
+    <section id="epic-swimlane" class="epic-swimlane${isCollapsed ? ' epic-swimlane--collapsed' : ''}">
+      <div class="epic-swimlane-header">
+        <button class="epic-swimlane-toggle" aria-expanded="${!isCollapsed}" aria-label="Toggle epics">
+          <span class="epic-swimlane-chevron">›</span>
+        </button>
+        <span class="epic-swimlane-label">📌 Epics</span>
+        <span class="epic-swimlane-count">${filtered.length}</span>
+      </div>
+      <div class="epic-swimlane-track">
+        ${filtered.map(renderEpicCard).join('')}
+      </div>
+    </section>
+  `;
+
+  const board = document.getElementById('board')!;
+  if (existing) {
+    existing.outerHTML = html;
+  } else {
+    board.insertAdjacentHTML('beforebegin', html);
+  }
+
+  const swimlane = document.getElementById('epic-swimlane')!;
+  const toggle = swimlane.querySelector<HTMLButtonElement>('.epic-swimlane-toggle')!;
+  toggle.addEventListener('click', () => {
+    const collapsed = swimlane.classList.toggle('epic-swimlane--collapsed');
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    localStorage.setItem(EPIC_SWIMLANE_COLLAPSED_KEY, String(collapsed));
+  });
+
+  swimlane.querySelectorAll<HTMLElement>('.epic-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = parseInt(card.dataset.id!);
+      const project = card.dataset.project;
+      showTaskDetail(id, project);
+    });
+  });
+}
+
+function populateEpicSelect(): void {
+  const select = document.getElementById('add-epic') as HTMLSelectElement | null;
+  if (!select) return;
+  const prev = select.value;
+  const epicsForProject = currentProject
+    ? currentEpics.filter(e => e.project === currentProject)
+    : currentEpics;
+  select.innerHTML = '<option value="">— No epic —</option>'
+    + epicsForProject
+        .sort((a, b) => a.project.localeCompare(b.project) || b.id - a.id)
+        .map(e => {
+          const label = escapeHtml(e.title.replace(/^\[Explore\]\s*/i, ''));
+          const proj = currentProject ? '' : ` [${escapeHtml(e.project)}]`;
+          return `<option value="${e.id}">${label}${proj}</option>`;
+        }).join('');
+  if (prev) select.value = prev;
+}
+
+function jumpToEpic(epicId: number): void {
+  const swimlane = document.getElementById('epic-swimlane');
+  if (!swimlane) return;
+  if (swimlane.classList.contains('epic-swimlane--collapsed')) {
+    const toggle = swimlane.querySelector<HTMLButtonElement>('.epic-swimlane-toggle');
+    toggle?.click();
+  }
+  const epicCard = swimlane.querySelector<HTMLElement>(`.epic-card[data-id="${epicId}"]`);
+  if (epicCard) {
+    epicCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    epicCard.classList.add('epic-card--highlight');
+    setTimeout(() => epicCard.classList.remove('epic-card--highlight'), 1200);
+  }
+}
+
+function wrapWithProjectGroups(tasks: Task[], renderFn: (t: Task) => string): string {
+  if (currentProject !== null) {
+    return tasks.map(renderFn).join('');
+  }
+  const projectOrder: string[] = [];
+  const groups = new Map<string, Task[]>();
+  tasks.forEach(t => {
+    if (!groups.has(t.project)) {
+      groups.set(t.project, []);
+      projectOrder.push(t.project);
+    }
+    groups.get(t.project)!.push(t);
+  });
+  if (projectOrder.length <= 1) {
+    return tasks.map(renderFn).join('');
+  }
+  return projectOrder.map(pid => {
+    const group = groups.get(pid)!;
+    const displayName = escapeHtml(projectNameMap.get(pid) ?? pid);
+    return `<div class="project-group-header" data-project="${escapeHtml(pid)}"><span class="project-group-name">${displayName}</span><span class="project-group-count">${group.length}</span></div>`
+      + group.map(renderFn).join('');
+  }).join('');
+}
+
 function renderColumn(
   key: string,
   label: string,
@@ -929,18 +1329,41 @@ function renderColumn(
   totalCount: number = tasks.length
 ): string {
   const expanded = isMobileColumnExpanded(key);
-  const cardsHtml = sortTasks(tasks, key).map(renderCard).join("");
+  const sorted = sortTasks(tasks, key);
+  let cardsHtml: string;
+  if (key === 'todo' && sorted.length > 0) {
+    const PRIORITY_ORDER = ['high', 'medium', 'low', ''];
+    const groups = new Map<string, Task[]>();
+    PRIORITY_ORDER.forEach(p => groups.set(p, []));
+    sorted.forEach(t => {
+      const p = (t.priority || '').toLowerCase();
+      const bucket = groups.has(p) ? p : '';
+      groups.get(bucket)!.push(t);
+    });
+    cardsHtml = PRIORITY_ORDER
+      .filter(p => (groups.get(p)?.length ?? 0) > 0)
+      .map(p => {
+        const group = groups.get(p)!;
+        const label = p ? p.toUpperCase() : 'OTHER';
+        return `<div class="priority-group-header priority-group-${p || 'other'}">${label} <span>${group.length}</span></div>`
+          + wrapWithProjectGroups(group, t => renderCard(t, true));
+      })
+      .join('');
+  } else {
+    cardsHtml = wrapWithProjectGroups(sorted, t => renderCard(t, true));
+  }
   const addBtn = key === "todo"
     ? `<button class="add-card-btn" id="add-card-btn" title="Add card">+</button>`
     : "";
   const countLabel = totalCount !== tasks.length ? `${tasks.length}/${totalCount}` : `${totalCount}`;
+  const countTitle = totalCount !== tasks.length ? ` title="Showing ${tasks.length} of ${totalCount}"` : '';
   return `
     <div class="column ${key}" data-column="${key}" data-mobile-expanded="${expanded}" data-total-count="${totalCount}">
       <div class="column-header">
         <button class="column-toggle-btn" type="button" data-column-toggle="${key}" aria-expanded="${expanded}">
-          <span class="column-toggle-label">${icon} ${label}</span>
+          <span class="column-toggle-label">${icon} <span class="column-label">${label}</span></span>
           <span class="column-toggle-meta">
-            <span class="count">${countLabel}</span>
+            <span class="count"${countTitle}>${countLabel}</span>
             <span class="column-toggle-icon" aria-hidden="true">${expanded ? "−" : "+"}</span>
           </span>
         </button>
@@ -1164,19 +1587,61 @@ function renderTestEntries(results: any[]): string {
   `).join('');
 }
 
+async function compressImage(file: File, maxSize = 1920, quality = 0.82): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          height = Math.round((height * maxSize) / width);
+          width = maxSize;
+        } else {
+          width = Math.round((width * maxSize) / height);
+          height = maxSize;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Image load failed")); };
+    img.src = url;
+  });
+}
+
 async function uploadFiles(taskId: number, files: FileList | File[], project: string) {
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
-    const reader = new FileReader();
-    const data: string = await new Promise((resolve) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.readAsDataURL(file);
-    });
-    await apiFetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
+    let data: string;
+    try {
+      data = await compressImage(file);
+    } catch {
+      // fallback: raw base64 (e.g. SVG)
+      data = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+    }
+    const ext = file.name.match(/\.[^.]+$/)?.[0]?.toLowerCase();
+    const filename = (ext === ".jpg" || ext === ".jpeg" || ext === ".png" || ext === ".webp" || ext === ".gif" || ext === ".svg")
+      ? file.name
+      : file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    const res = await apiFetch(`/api/task/${taskId}/attachment?project=${encodeURIComponent(project)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: file.name, data }),
+      body: JSON.stringify({ filename, data }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      showToast(err.error || `Upload failed (${res.status})`);
+      return;
+    }
   }
   showTaskDetail(taskId, project);
 }
@@ -1285,7 +1750,7 @@ async function showTaskDetail(id: number, project?: string) {
         <div class="phase-body hidden" id="req-body-edit">
           <textarea id="req-textarea" rows="8">${(task.description || '').replace(/</g, '&lt;')}</textarea>
           <div class="attachment-drop-zone" id="attachment-drop-zone">
-            <span>\u{1F4CE} Drop images here or click to attach</span>
+            <span>\u{1F4CE} Drop images, paste (⌘V), or click to attach</span>
             <input type="file" id="attachment-input" accept="image/*" multiple hidden />
           </div>
           ${attachmentsHtml ? `<div id="edit-attachments">${attachmentsHtml}</div>` : ''}
@@ -1566,6 +2031,14 @@ async function showTaskDetail(id: number, project?: string) {
       });
     }
 
+    // Clipboard paste → image attachment
+    content.addEventListener("paste", async (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+      if (files.length === 0) return;
+      e.preventDefault();
+      await uploadFiles(id, files, task.project);
+    });
+
     // Attachment remove buttons
     content.querySelectorAll(".attachment-remove").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
@@ -1612,7 +2085,7 @@ async function showTaskDetail(id: number, project?: string) {
   }
 }
 
-// Neon/PostgreSQL returns timestamps as "YYYY-MM-DD HH:mm:ss.ffffff" (space, no T, no Z).
+// PostgreSQL returns timestamps as "YYYY-MM-DD HH:mm:ss.ffffff" (space, no T, no Z).
 // new Date() requires ISO 8601 T-separator; we normalize here.
 function parseTs(dateStr: string): Date {
   if (!dateStr) return new Date(NaN);
@@ -1736,6 +2209,7 @@ async function loadChronicleView() {
     const data = await fetchSummaryBoard("full");
 
     renderProjectFilter(data.projects);
+    renderCategoryFilter();
 
     const allTasks: Task[] = [];
     for (const col of COLUMNS) {
@@ -1786,6 +2260,8 @@ async function loadChronicleView() {
       });
     });
 
+    applyClientCategoryFilter();
+
   } catch (err) {
     console.error("loadChronicleView failed:", err);
     el.innerHTML = `
@@ -1798,18 +2274,28 @@ async function loadChronicleView() {
 async function loadBoard() {
   const board = document.getElementById("board")!;
   try {
-    const data = await fetchSummaryBoard("board");
+    const data = await fetchSummaryBoard(shouldLoadExpandedBoardSummary() ? "full" : "board");
     ensureMobileBoardExpanded(data);
 
     renderProjectFilter(data.projects);
+    if (!categoriesFetched) {
+      categoriesFetched = true;
+      fetchProjectCategories().then(() => { renderCategoryFilter(); renderSidebarProjects(); });
+    } else {
+      renderCategoryFilter();
+    }
+
+    currentEpics = data.epics ?? [];
+    renderEpicSwimlane(currentEpics);
+    populateEpicSelect();
 
     board.innerHTML = COLUMNS.map((col) =>
       renderColumn(
         col.key,
         col.label,
         col.icon,
-        data[col.key as keyof Omit<Board, "projects" | "counts">],
-        data.counts?.[col.key as ColumnKey] ?? data[col.key as keyof Omit<Board, "projects" | "counts">].length
+        data[col.key as keyof Omit<Board, "projects" | "counts" | "epics">],
+        data.counts?.[col.key as ColumnKey] ?? data[col.key as keyof Omit<Board, "projects" | "counts" | "epics">].length
       )
     ).join("");
 
@@ -1843,6 +2329,13 @@ async function loadBoard() {
           });
           return;
         }
+        const epicBadgeEl = (e.target as HTMLElement).closest(".epic-badge") as HTMLElement | null;
+        if (epicBadgeEl) {
+          e.stopPropagation();
+          const epicId = parseInt(epicBadgeEl.dataset.epicId!);
+          if (!isNaN(epicId)) jumpToEpic(epicId);
+          return;
+        }
         const id = parseInt((el as HTMLElement).dataset.id!);
         const project = (el as HTMLElement).dataset.project;
         showTaskDetail(id, project);
@@ -1854,6 +2347,10 @@ async function loadBoard() {
     }
     setupMobileBoardInteractions();
     applySearchFilter();
+    applyClientCategoryFilter();
+    initSidebar();
+    applyHiddenStages();
+    updateSidebarBadges();
 
     const addBtn = document.getElementById("add-card-btn");
     if (addBtn) {
@@ -1861,7 +2358,9 @@ async function loadBoard() {
         e.stopPropagation();
         document.getElementById("add-card-overlay")!.classList.remove("hidden");
         syncOverlayState();
-        (document.getElementById("add-title") as HTMLInputElement).focus();
+        if (!isMobileViewport) {
+          (document.getElementById("add-title") as HTMLInputElement).focus();
+        }
       });
     }
   } catch (err) {
@@ -1920,6 +2419,7 @@ async function loadListView() {
     const data = await fetchSummaryBoard("full");
 
     renderProjectFilter(data.projects);
+    renderCategoryFilter();
 
     // Flatten all tasks from all columns
     const allTasks: Task[] = [];
@@ -2042,6 +2542,7 @@ async function loadListView() {
     });
 
     applySearchFilter();
+    applyClientCategoryFilter();
   } catch (err) {
     console.error("loadListView failed:", err);
     listView.innerHTML = `
@@ -2052,16 +2553,100 @@ async function loadListView() {
   }
 }
 
+async function fetchProjectCategories(): Promise<void> {
+  try {
+    const res = await apiFetch('/api/projects');
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const p of (data.projects ?? [])) {
+      if (p.id && p.category) projectCategoryMap.set(p.id, p.category);
+      if (p.id) projectNameMap.set(p.id, p.name || p.id);
+    }
+  } catch {
+    // silently fail — category chips stay hidden
+  }
+}
+
+function renderCategoryFilter() {
+  const container = document.getElementById('category-filter');
+  if (!container) return;
+
+  const categories = [...new Set(projectCategoryMap.values())].sort();
+  if (categories.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const chips = [
+    `<button class="cat-chip${!currentCategory ? ' active' : ''}" data-cat="">All</button>`,
+    ...categories.map(cat =>
+      `<button class="cat-chip${currentCategory === cat ? ' active' : ''}" data-cat="${cat}">${cat}</button>`
+    ),
+  ].join('');
+  container.innerHTML = chips;
+
+  container.querySelectorAll<HTMLButtonElement>('.cat-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentCategory = btn.dataset.cat || null;
+      if (currentCategory) {
+        localStorage.setItem('kanban-category', currentCategory);
+      } else {
+        localStorage.removeItem('kanban-category');
+      }
+
+      // 카테고리 내 프로젝트 목록
+      const inCategory = currentCategory
+        ? allProjects.filter(p => projectCategoryMap.get(p) === currentCategory)
+        : allProjects;
+
+      if (!currentCategory) {
+        // All 선택 시 프로젝트 필터 유지
+      } else if (inCategory.length === 1) {
+        // 단일 프로젝트 카테고리 → API 레벨 필터로 자동 선택
+        currentProject = inCategory[0];
+        localStorage.setItem('kanban-project', currentProject);
+      } else {
+        // 복수 프로젝트 카테고리 → 현재 프로젝트가 범위 밖이면 초기화
+        if (currentProject && !inCategory.includes(currentProject)) {
+          currentProject = null;
+          localStorage.removeItem('kanban-project');
+        }
+      }
+
+      currentBoardVersion = null;
+      currentBoardVersionEtag = null;
+      renderCategoryFilter();
+      renderProjectFilter(allProjects);
+      refreshCurrentView();
+    });
+  });
+}
+
+function applyClientCategoryFilter() {
+  if (!currentCategory || currentProject) return; // API 필터가 이미 적용됐으면 스킵
+  const selectors = '.card[data-project], .list-card[data-project], .chronicle-event[data-project]';
+  document.querySelectorAll<HTMLElement>(selectors).forEach(el => {
+    const cat = projectCategoryMap.get(el.dataset.project || '');
+    el.style.display = cat === currentCategory ? '' : 'none';
+  });
+}
+
 function renderProjectFilter(projects: string[]) {
+  allProjects = projects;
+
+  const filtered = currentCategory
+    ? projects.filter(p => projectCategoryMap.get(p) === currentCategory)
+    : projects;
+
   const container = document.getElementById("project-filter")!;
-  if (projects.length <= 1) {
-    container.innerHTML = projects[0]
-      ? `<span class="project-label">${projects[0]}</span>`
+  if (filtered.length <= 1) {
+    container.innerHTML = filtered[0]
+      ? `<span class="project-label">${filtered[0]}</span>`
       : "";
     return;
   }
 
-  const options = projects
+  const options = filtered
     .map(
       (p) =>
         `<option value="${p}" ${p === currentProject ? "selected" : ""}>${p}</option>`
@@ -2084,6 +2669,7 @@ function renderProjectFilter(projects: string[]) {
     }
     currentBoardVersion = null;
     currentBoardVersionEtag = null;
+    renderSidebarProjects();
     refreshCurrentView();
   });
 }
@@ -2354,7 +2940,7 @@ document.getElementById("refresh-btn")!.addEventListener("click", refreshCurrent
 // Search — DOM filter, no API re-fetch
 document.getElementById("search-input")!.addEventListener("input", (e) => {
   currentSearch = (e.target as HTMLInputElement).value.trim();
-  if (currentView === "board" && isMobileViewport) {
+  if (currentView === "board") {
     loadBoard();
     return;
   }
@@ -2380,21 +2966,25 @@ document.getElementById("hide-done-btn")!.addEventListener("click", () => {
 document.getElementById("modal-close")!.addEventListener("click", () => {
   document.getElementById("modal-overlay")!.classList.add("hidden");
   syncOverlayState();
+  refreshCurrentView();
 });
 document.getElementById("modal-overlay")!.addEventListener("click", (e) => {
   if (e.target === e.currentTarget) {
     document.getElementById("modal-overlay")!.classList.add("hidden");
     syncOverlayState();
+    refreshCurrentView();
   }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    const modalWasOpen = !document.getElementById("modal-overlay")!.classList.contains("hidden");
     document.getElementById("modal-overlay")!.classList.add("hidden");
     document.getElementById("add-card-overlay")!.classList.add("hidden");
     if (!document.getElementById("auth-overlay")!.classList.contains("hidden") && authReady) {
       hideAuthOverlay();
     }
     syncOverlayState();
+    if (modalWasOpen) refreshCurrentView();
   }
 });
 
@@ -2468,6 +3058,12 @@ addAttachInput.addEventListener("change", () => {
   if (addAttachInput.files) addPendingFiles(addAttachInput.files);
   addAttachInput.value = "";
 });
+addCardOverlay.addEventListener("paste", (e: ClipboardEvent) => {
+  const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+  if (files.length === 0) return;
+  e.preventDefault();
+  addPendingFiles(files);
+});
 
 document.getElementById("add-card-form")!.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -2479,6 +3075,8 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
   const description = (document.getElementById("add-description") as HTMLTextAreaElement).value.trim() || null;
   const tagsRaw = (document.getElementById("add-tags") as HTMLInputElement).value.trim();
   const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : null;
+  const epicIdRaw = (document.getElementById("add-epic") as HTMLSelectElement | null)?.value;
+  const epicId = epicIdRaw ? parseInt(epicIdRaw) || null : null;
 
   const project = currentProject;
   if (!project) {
@@ -2493,7 +3091,7 @@ document.getElementById("add-card-form")!.addEventListener("submit", async (e) =
   const res = await apiFetch("/api/task", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, priority, level, description, tags, project }),
+    body: JSON.stringify({ title, priority, level, description, tags, project, epic_id: epicId }),
   });
   const result = await res.json();
 

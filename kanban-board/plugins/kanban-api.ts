@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { neon } from "@neondatabase/serverless";
+import pg from "pg";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -35,12 +35,13 @@ async function deleteFromR2(key: string): Promise<void> {
   try { await getR2().send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key })); } catch { /* ok */ }
 }
 
-type Sql = ReturnType<typeof neon>;
+type Sql = pg.Pool;
 const BOARD_STATUSES = ["todo", "plan", "plan_review", "impl", "impl_review", "test", "done"] as const;
 
 // Typed query helper: returns T[]
 async function q<T>(sql: Sql, text: string, params?: any[]): Promise<T[]> {
-  return (await sql.query(text, params)) as unknown as T[];
+  const r = await sql.query(text, params);
+  return r.rows as T[];
 }
 
 function parseJsonArray(raw: string | null): any[] {
@@ -80,6 +81,8 @@ function summarizeBoardTask(task: Task) {
     status: task.status,
     priority: task.priority,
     level: task.level,
+    card_type: task.card_type,
+    epic_id: task.epic_id,
     current_agent: task.current_agent,
     plan_review_count: task.plan_review_count,
     impl_review_count: task.impl_review_count,
@@ -158,7 +161,7 @@ function sortBoardGroup<T extends { completed_at?: string | null; rank?: number;
     });
   }
   return sorted.sort((a, b) =>
-    Number(a.rank || 0) - Number(b.rank || 0) || Number(a.id || 0) - Number(b.id || 0)
+    Number(b.rank || 0) - Number(a.rank || 0) || Number(b.id || 0) - Number(a.id || 0)
   );
 }
 
@@ -222,7 +225,7 @@ function getSql(): Sql {
       "Create kanban-board/.env with: DATABASE_URL=postgresql://..."
     );
   }
-  _sql = neon(connectionString);
+  _sql = new pg.Pool({ connectionString });
   return _sql;
 }
 
@@ -281,6 +284,10 @@ async function initializeSchema(sql: Sql): Promise<void> {
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS decision_log TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when TEXT`,
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS brief TEXT`,
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS card_type TEXT NOT NULL DEFAULT 'task' CHECK (card_type IN ('task','epic'))`,
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS epic_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL`,
+    `UPDATE tasks SET card_type = 'epic' WHERE tags LIKE '%explore-report%' AND card_type = 'task'`,
   ];
   for (const m of migrations) await sql.query(m);
 
@@ -304,6 +311,31 @@ async function initializeSchema(sql: Sql): Promise<void> {
   await sql.query(`UPDATE tasks SET priority = 'low'       WHERE priority = '낮음'`);
   await sql.query(`UPDATE tasks SET status = 'impl'        WHERE status = 'inprogress'`);
   await sql.query(`UPDATE tasks SET status = 'impl_review' WHERE status = 'review'`);
+
+  // ── projects + project_links tables ──
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      purpose TEXT,
+      stack TEXT,
+      brief TEXT,
+      status TEXT DEFAULT 'active',
+      category TEXT,
+      repo_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS project_links (
+      source_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      target_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      relation TEXT NOT NULL,
+      PRIMARY KEY (source_id, target_id, relation)
+    )
+  `);
 }
 
 function ensureSchema(sql: Sql): Promise<void> {
@@ -334,6 +366,8 @@ interface Task {
   status: string;
   priority: string;
   rank: number;
+  card_type: string;
+  epic_id: number | null;
   description: string | null;
   plan: string | null;
   implementation_notes: string | null;
@@ -364,6 +398,7 @@ interface Board {
   updated_at?: string | null;
   total?: number;
   counts?: Partial<Record<typeof BOARD_STATUSES[number], number>>;
+  epics: Task[];
   todo: Task[];
   plan: Task[];
   plan_review: Task[];
@@ -451,7 +486,7 @@ export function kanbanApiPlugin(): Plugin {
           const todoLimit = compactBoard ? Math.max(0, Number.parseInt(reqUrl.searchParams.get("todo_limit") || "10", 10) || 10) : null;
           const doneLimit = compactBoard ? Math.max(0, Number.parseInt(reqUrl.searchParams.get("done_limit") || "10", 10) || 10) : null;
           const fields = summary
-            ? `id, project, title, status, priority, level, current_agent,
+            ? `id, project, title, status, priority, level, card_type, epic_id, current_agent,
                plan_review_count, impl_review_count, rank, tags,
                created_at, completed_at,
                review_comments, plan_review_comments, notes`
@@ -482,16 +517,19 @@ export function kanbanApiPlugin(): Plugin {
           );
           const projects = projectRows.map((r) => r.project);
 
-          let tasks: Task[];
+          let allTasks: Task[];
           if (projectParam) {
             const safe = sanitizeProject(projectParam);
-            tasks = await q<Task>(sql,
-              `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank, id`, [safe]
+            allTasks = await q<Task>(sql,
+              `SELECT ${fields} FROM tasks WHERE project = $1 ORDER BY rank DESC, id DESC`, [safe]
             );
           } else {
-            tasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank, id`);
+            allTasks = await q<Task>(sql, `SELECT ${fields} FROM tasks ORDER BY rank DESC, id DESC`);
           }
 
+          const epicTasks = allTasks.filter((t) => t.card_type === "epic");
+          const tasks = allTasks.filter((t) => t.card_type !== "epic");
+          const epics = summary ? epicTasks.map(summarizeBoardTask) : epicTasks;
           const boardTasks = summary ? tasks.map(summarizeBoardTask) : tasks;
 
           const grouped = new Map<string, any[]>();
@@ -517,6 +555,7 @@ export function kanbanApiPlugin(): Plugin {
             updated_at: meta.updated_at,
             total: meta.total,
             counts,
+            epics,
             todo: groupedBoard.todo || [],
             plan: groupedBoard.plan || [],
             plan_review: groupedBoard.plan_review || [],
@@ -548,6 +587,7 @@ export function kanbanApiPlugin(): Plugin {
               "impl_review_count","level","attachments","notes","decision_log",
               "done_when","rank","created_at","started_at","planned_at",
               "reviewed_at","tested_at","completed_at","updated_at",
+              "card_type","epic_id",
             ]);
             const fieldsParam = reqUrl.searchParams.get("fields");
             const fields = fieldsParam
@@ -623,6 +663,10 @@ export function kanbanApiPlugin(): Plugin {
             if (body.level !== undefined)         { sets.push(`level = $${p++}`); vals.push(body.level); }
             if (body.decision_log !== undefined)  { sets.push(`decision_log = $${p++}`); vals.push(body.decision_log); }
             if (body.done_when !== undefined)     { sets.push(`done_when = $${p++}`); vals.push(body.done_when); }
+            if (body.card_type !== undefined && ["task","epic"].includes(body.card_type)) {
+              sets.push(`card_type = $${p++}`); vals.push(body.card_type);
+            }
+            if (body.epic_id !== undefined)       { sets.push(`epic_id = $${p++}`); vals.push(body.epic_id === null ? null : Number(body.epic_id)); }
 
             if (sets.length > 0) {
               sets.push("updated_at = NOW()");
@@ -723,18 +767,17 @@ export function kanbanApiPlugin(): Plugin {
               }
             } else { newRank = 1000; }
           } else if (afterId) {
+            // afterId = visually above = higher rank in DESC order
+            // Drop at bottom: need rank LOWER than afterId
             const [above] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [afterId]);
-            newRank = above ? above.rank + 1000 : 1000;
-          } else if (beforeId) {
-            const [below] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
-            if (below) {
-              newRank = Math.floor(below.rank / 2);
-              if (newRank === 0) {
-                await renumberRanks(sql, task.project, targetStatus);
-                const [b2] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
-                newRank = Math.floor(b2.rank / 2);
-              }
+            if (above) {
+              newRank = above.rank - 1000;
             } else { newRank = 1000; }
+          } else if (beforeId) {
+            // beforeId = visually below = lower rank in DESC order
+            // Drop at top: need rank HIGHER than beforeId
+            const [below] = await q<{ rank: number }>(sql, "SELECT rank FROM tasks WHERE id = $1", [beforeId]);
+            newRank = below ? below.rank + 1000 : 1000;
           } else { newRank = 1000; }
 
           await sql.query("UPDATE tasks SET rank = $1, updated_at = NOW() WHERE id = $2", [newRank, id]);
@@ -761,16 +804,18 @@ export function kanbanApiPlugin(): Plugin {
             ? (typeof body.tags === "string" ? body.tags : JSON.stringify(body.tags))
             : null;
           const level = body.level !== undefined ? parseInt(body.level) || 3 : 3;
+          const cardType = body.card_type === "epic" ? "epic" : "task";
+          const epicId = body.epic_id != null ? Number(body.epic_id) : null;
 
           const [maxRow] = await q<{ maxrank: number | null }>(sql,
             "SELECT MAX(rank) AS maxrank FROM tasks WHERE project = $1 AND status = 'todo'", [safe]
           );
-          const rank = (maxRow?.maxrank ?? 0) + 1000;
+          const rank = (maxRow?.maxrank ?? 0) + 1;
 
           const [row] = await q<{ id: number }>(sql,
-            `INSERT INTO tasks (project, title, priority, description, tags, rank, level)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-            [safe, title, priority, description, tags, rank, level]
+            `INSERT INTO tasks (project, title, priority, description, tags, rank, level, card_type, epic_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+            [safe, title, priority, description, tags, rank, level, cardType, epicId]
           );
 
           res.setHeader("Content-Type", "application/json");
@@ -991,6 +1036,174 @@ export function kanbanApiPlugin(): Plugin {
           res.setHeader("Location", `${r2PublicUrl()}/${safeName}`);
           res.end();
           return;
+        }
+
+        // ── Projects API ──────────────────────────────────────────────────────
+
+        // GET /api/projects — List all with links
+        if (pathname === "/api/projects" && req.method === "GET") {
+          const rows = await q(sql, `
+            SELECT p.*,
+              COALESCE(json_agg(json_build_object(
+                'source_id', pl.source_id, 'target_id', pl.target_id, 'relation', pl.relation
+              )) FILTER (WHERE pl.source_id IS NOT NULL), '[]') AS links
+            FROM projects p
+            LEFT JOIN project_links pl ON p.id = pl.source_id OR p.id = pl.target_id
+            GROUP BY p.id
+            ORDER BY p.category, p.name
+          `);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ projects: rows }));
+          return;
+        }
+
+        // POST /api/projects — Create/Upsert
+        if (pathname === "/api/projects" && req.method === "POST") {
+          const body = await parseBody(req);
+          if (!body.id || !body.name) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "id and name are required" }));
+            return;
+          }
+          const [row] = await q(sql, `
+            INSERT INTO projects (id, name, purpose, stack, brief, status, category, repo_url)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (id) DO UPDATE SET
+              name = EXCLUDED.name,
+              purpose = COALESCE(EXCLUDED.purpose, projects.purpose),
+              stack = COALESCE(EXCLUDED.stack, projects.stack),
+              brief = COALESCE(EXCLUDED.brief, projects.brief),
+              status = COALESCE(EXCLUDED.status, projects.status),
+              category = COALESCE(EXCLUDED.category, projects.category),
+              repo_url = COALESCE(EXCLUDED.repo_url, projects.repo_url),
+              updated_at = NOW()
+            RETURNING *
+          `, [body.id, body.name, body.purpose || null, body.stack || null, body.brief || null, body.status || 'active', body.category || null, body.repo_url || null]);
+          res.setHeader("Content-Type", "application/json");
+          broadcast();
+          res.end(JSON.stringify({ success: true, project: row }));
+          return;
+        }
+
+        // /api/projects/:id routes
+        const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+        if (projectMatch) {
+          const projectId = decodeURIComponent(projectMatch[1]);
+
+          // GET /api/projects/:id — Single project with task stats
+          if (req.method === "GET") {
+            const [project] = await q(sql, "SELECT * FROM projects WHERE id = $1", [projectId]);
+            if (!project) {
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Project not found" }));
+              return;
+            }
+            const taskCounts = await q<{ status: string; count: number }>(sql, "SELECT status, COUNT(*)::int AS count FROM tasks WHERE project = $1 GROUP BY status", [projectId]);
+            const links = await q(sql, "SELECT * FROM project_links WHERE source_id = $1 OR target_id = $1", [projectId]);
+            const counts: Record<string, number> = {};
+            for (const row of taskCounts) {
+              counts[row.status] = row.count;
+            }
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ...project, task_counts: counts, links }));
+            return;
+          }
+
+          // PATCH /api/projects/:id — Update
+          if (req.method === "PATCH") {
+            const body = await parseBody(req);
+            const sets: string[] = [];
+            const values: any[] = [];
+            let position = 1;
+            const assign = (field: string, value: any) => {
+              if (value === undefined) return;
+              sets.push(`${field} = $${position++}`);
+              values.push(value);
+            };
+            assign("name", body.name);
+            assign("purpose", body.purpose);
+            assign("stack", body.stack);
+            assign("brief", body.brief);
+            assign("status", body.status);
+            assign("category", body.category);
+            assign("repo_url", body.repo_url);
+            if (sets.length === 0) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "No fields to update" }));
+              return;
+            }
+            sets.push("updated_at = NOW()");
+            values.push(projectId);
+            await sql.query(`UPDATE projects SET ${sets.join(", ")} WHERE id = $${position}`, values);
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+
+          // DELETE /api/projects/:id
+          if (req.method === "DELETE") {
+            await sql.query("DELETE FROM projects WHERE id = $1", [projectId]);
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+        }
+
+        // /api/projects/:id/links routes
+        const projectLinksMatch = pathname.match(/^\/api\/projects\/([^/]+)\/links$/);
+        if (projectLinksMatch) {
+          const projectId = decodeURIComponent(projectLinksMatch[1]);
+
+          // GET /api/projects/:id/links
+          if (req.method === "GET") {
+            const links = await q(sql, "SELECT * FROM project_links WHERE source_id = $1 OR target_id = $1", [projectId]);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ links }));
+            return;
+          }
+
+          // POST /api/projects/:id/links
+          if (req.method === "POST") {
+            const body = await parseBody(req);
+            if (!body.target_id || !body.relation) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "target_id and relation are required" }));
+              return;
+            }
+            await sql.query(
+              "INSERT INTO project_links (source_id, target_id, relation) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+              [projectId, body.target_id, body.relation]
+            );
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
+
+          // DELETE /api/projects/:id/links
+          if (req.method === "DELETE") {
+            const body = await parseBody(req);
+            if (!body.target_id || !body.relation) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "target_id and relation are required" }));
+              return;
+            }
+            await sql.query(
+              "DELETE FROM project_links WHERE source_id = $1 AND target_id = $2 AND relation = $3",
+              [projectId, body.target_id, body.relation]
+            );
+            res.setHeader("Content-Type", "application/json");
+            broadcast();
+            res.end(JSON.stringify({ success: true }));
+            return;
+          }
         }
 
         // ── Bitbucket PR Webhook ──────────────────────────────

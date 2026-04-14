@@ -74,9 +74,58 @@ This skill explores first, reports direction, then seeds the kanban board with p
    If you cannot find evidence for something, say "not found" — do not guess.
    ───────────────────────────────────────────────
 
+② ½ Architecture planning (Agent → Plan subagent)
+
+   Save the Explore agent's output as $EXPLORE_FINDINGS.
+   Launch a second Agent subagent with subagent_type="Plan".
+   Pass the following prompt — fill in <TOPIC>, <PROJECT>, and <EXPLORE_FINDINGS>:
+
+   ───────────────────────────────────────────────
+   You are performing architecture planning for the topic: "<TOPIC>"
+   Project: <PROJECT>
+
+   ## Codebase Findings (from Explore agent)
+   <EXPLORE_FINDINGS>
+
+   ## Your Task
+   Based on the above codebase findings, produce the following three sections:
+
+   ### 1. Possible Directions (2–3 options, only genuinely distinct ones)
+   For each direction:
+   - **Name**: concise label
+   - **Approach**: 1–2 sentences, concrete not abstract
+   - **Pros**: bulleted list
+   - **Cons**: bulleted list
+   - **Estimated complexity**: Low / Medium / High
+   - **Files likely touched**: list specific files cited in the findings
+   - **Risk**: any architectural risks or unknowns
+
+   ### 2. Recommended Direction
+   State which direction you recommend and WHY, citing specific file paths from the codebase findings.
+   If only one direction makes sense, say so — do not fabricate alternatives.
+
+   ### 3. Phased Task Breakdown (for the recommended direction)
+   3–7 tasks in logical implementation order. Each task must be completable independently.
+   The last task must always be E2E tests ("Add E2E tests for <topic>").
+
+   For each task:
+   - **Title**: concise imperative phrase
+   - **Phase**: sequential number
+   - **Rationale**: 1 sentence — why this step at this phase
+   - **Files**: specific files this task will touch (from findings)
+   - **Complexity**: Low / Medium / High
+
+   Honesty rules:
+   - Every claim must reference a file path from the Explore findings.
+   - If something is unclear from the codebase, say "unclear — needs investigation".
+   - Do not invent patterns that were not found in the codebase.
+   ───────────────────────────────────────────────
+
+   Save this output as $PLAN_OUTPUT.
+
 ③ Write the Exploration Report
 
-   Using the Explore agent's output, write the following report.
+   Using $EXPLORE_FINDINGS (Explore agent) and $PLAN_OUTPUT (Plan agent), write the following report.
    This report will be stored permanently in the kanban board.
 
    ┌─────────────────────────────────────────────┐
@@ -94,27 +143,15 @@ This skill explores first, reports direction, then seeds the kanban board with p
 
    ### Possible Directions
 
-   #### Direction A: <name>
-   **Approach**: [1–2 sentences — concrete, not abstract]
-   **Pros**: [bulleted]
-   **Cons**: [bulleted]
-   **Estimated complexity**: Low / Medium / High
-   **Files likely touched**: [`file1.ts`, `file2.ts`, ...]
-
-   #### Direction B: <name>
-   [same structure]
-
-   #### Direction C: <name>  ← only if genuinely distinct; omit if not
-   [same structure]
+   [Copy from $PLAN_OUTPUT § "Possible Directions" — do not paraphrase or rewrite]
 
    ### Recommended Direction
-   [State which direction you recommend and WHY, citing codebase evidence.
-    If there is only one sensible direction, say so clearly.]
+   [Copy from $PLAN_OUTPUT § "Recommended Direction" — do not paraphrase or rewrite]
    └─────────────────────────────────────────────┘
 
    Honesty rules:
-   - If only one direction makes sense, present one. Do not fabricate alternatives.
-   - Every claim must cite a file path. No assumptions without evidence.
+   - Directions and recommendation come verbatim from the Plan agent's output.
+   - If the Plan agent said "only one direction makes sense", present one. Do not fabricate alternatives.
    - If the codebase gives no signal on something, say "unclear from codebase".
 
 ④ Present report + ask user to choose direction
@@ -129,18 +166,22 @@ This skill explores first, reports direction, then seeds the kanban board with p
 
 ⑤ Generate phased kanban tasks
 
-   ⑤-A Plan all tasks BEFORE creating any.
-   Write out the full task list mentally first:
-   - 3–7 tasks in logical implementation order
-   - Each task completable independently in one pipeline run
-   - Split if a task would touch more than 3 unrelated files
+   ⑤-A Use the task breakdown from $PLAN_OUTPUT.
+   The Plan agent already produced a phased task list — use it directly.
+   Re-derive tasks only if the user selected a direction other than the Plan agent's recommendation.
 
-   For each task determine:
-   - title: concise imperative verb phrase ("Add X", "Refactor Y", "Integrate Z")
+   Map each task to kanban fields:
+   - title: from Plan output (already imperative verb phrase)
    - phase: sequential number (1, 2, 3…) — used as a tag
    - priority: high (phase 1–2), medium (phase 3–4), low (phase 5+)
-   - level: L2 or L3 based on complexity
+   - level: L2 or L3 based on complexity from Plan output
    - tags: "explore-<topic-slug>, phase:<N>, <module-tag>"
+
+   **The LAST task must always be an E2E test task.**
+   Title format: "Add E2E tests for <topic>"
+   Description should cover: key user flows to verify, happy path + edge cases,
+   which pages/endpoints to test, and acceptance criteria.
+   Priority: medium, Level: L2, extra tag: "e2e-test"
 
    ⑤-B Create the report anchor task FIRST.
    This special task stores the full exploration report:

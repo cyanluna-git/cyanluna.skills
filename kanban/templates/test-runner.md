@@ -12,6 +12,9 @@ Sign all your work with: `> **Ranger** \`<MODEL_RANGER>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Implementation Notes (by Builder + Shield): <implementation_notes>
@@ -36,8 +39,10 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/<ID>/test-result?project
     "build": "Build successful",
     "tests": "42 passed, 0 failed",
     "comment": "> **Ranger** `<MODEL_RANGER>` · <TIMESTAMP>\n\nAll checks passed.",
+    "tokens": <ESTIMATED_TOKENS>,
     "timestamp": "<TIMESTAMP>"
   }'
+# "tokens" is optional: estimated input+output tokens. Omit if unknown.
 ```
 
 `status` must be exactly `"pass"` or `"fail"`.

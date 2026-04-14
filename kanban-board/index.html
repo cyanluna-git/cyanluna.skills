@@ -4,10 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kanban Board</title>
-    <meta name="theme-color" content="#1e293b" />
+    <meta name="theme-color" content="#060e20" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Kanban Board" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -34,9 +37,62 @@
       <div class="header-meta">
         <button id="auth-btn" class="toolbar-toggle-btn" title="Shared token access">Private</button>
         <span id="count-summary"></span>
+        <span id="hidden-stage-count"></span>
         <button id="refresh-btn" title="Refresh">&#x21bb;</button>
       </div>
     </header>
+    <aside class="sidebar">
+      <button class="sidebar-show-all-btn" id="sidebar-show-all" style="display:none">Show All</button>
+      <nav class="sidebar-nav">
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="todo">
+          <span class="sidebar-icon">📋</span>
+          <span class="sidebar-label">Todo</span>
+          <span class="sidebar-badge" data-stage="todo"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="plan">
+          <span class="sidebar-icon">🗺️</span>
+          <span class="sidebar-label">Plan</span>
+          <span class="sidebar-badge" data-stage="plan"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="plan_review">
+          <span class="sidebar-icon">🔍</span>
+          <span class="sidebar-label">Review Plan</span>
+          <span class="sidebar-badge" data-stage="plan_review"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="impl">
+          <span class="sidebar-icon">💻</span>
+          <span class="sidebar-label">Implement</span>
+          <span class="sidebar-badge" data-stage="impl"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="impl_review">
+          <span class="sidebar-icon">🔎</span>
+          <span class="sidebar-label">Review Impl</span>
+          <span class="sidebar-badge" data-stage="impl_review"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="test">
+          <span class="sidebar-icon">🧪</span>
+          <span class="sidebar-label">Test</span>
+          <span class="sidebar-badge" data-stage="test"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+        <div role="button" tabindex="0" class="sidebar-item" data-stage="done">
+          <span class="sidebar-icon">✅</span>
+          <span class="sidebar-label">Done</span>
+          <span class="sidebar-badge" data-stage="done"></span>
+          <button class="sidebar-eye-btn" title="Hide/show column" aria-label="Toggle column visibility">👁</button>
+        </div>
+      </nav>
+      <div class="sidebar-section-divider"></div>
+      <div class="sidebar-projects">
+        <div class="sidebar-section-label">Projects</div>
+      </div>
+      <button class="sidebar-collapse-btn" id="sidebar-collapse-btn">&#x2039;</button>
+    </aside>
     <div class="toolbar">
       <div class="toolbar-primary">
         <button id="toolbar-mobile-toggle" class="toolbar-toggle-btn toolbar-mobile-toggle" title="Show filters">
@@ -45,6 +101,7 @@
         <input type="search" id="search-input" placeholder="Search tasks…" autocomplete="off" />
       </div>
       <div class="toolbar-secondary" id="toolbar-secondary">
+        <div id="category-filter"></div>
         <div id="project-filter"></div>
         <select id="sort-select">
           <option value="default">Sort: Rank</option>
@@ -112,13 +169,19 @@
             <textarea id="add-description" rows="4" placeholder="Requirements in markdown"></textarea>
           </div>
           <div class="form-group">
-            <label for="add-tags">Tags <span style="color:#64748b;font-weight:400">(comma separated)</span></label>
+            <label for="add-tags">Tags <span style="color:var(--color-outline);font-weight:400">(comma separated)</span></label>
             <input type="text" id="add-tags" placeholder="e.g. feature, api, ui" />
+          </div>
+          <div class="form-group">
+            <label for="add-epic">Epic</label>
+            <select id="add-epic">
+              <option value="">— No epic —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Attachments</label>
             <div class="attachment-drop-zone" id="add-attachment-zone">
-              <span>&#x1F4CE; Drop images here or click to attach</span>
+              <span>&#x1F4CE; Drop images, paste (&#x2318;V), or click to attach</span>
               <input type="file" id="add-attachment-input" accept="image/*" multiple hidden />
             </div>
             <div class="attachments-grid" id="add-attachment-preview"></div>

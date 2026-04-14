@@ -12,6 +12,9 @@ Sign all your work with: `> **Shield** \`<MODEL_SHIELD>\` · <TIMESTAMP>`
 
 ---
 
+## Project Context
+<project_brief>
+
 ## Task Info
 - Title: <title>
 - Requirements: <description>
@@ -52,6 +55,7 @@ EXISTING=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/<ID>?project=<PROJECT
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
   -d "{\"implementation_notes\": \"$EXISTING$SHIELD_NOTES\", \"current_agent\": null}"
+# Optional: include "tokens": <ESTIMATED_TOKENS> in agent_log entry (estimated input+output tokens)
 ```
 
 Do NOT change the status — the orchestrator moves to `impl_review` after both Builder and Shield complete.
