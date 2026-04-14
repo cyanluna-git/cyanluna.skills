@@ -13,11 +13,11 @@ Tasks are aggregated by date + project + work type into one worklog card per gro
 
 Each kanban project has a `worklog_type`:
 
-| type | 동작 |
-|------|------|
-| `work` | EOB 프로젝트에 매핑, `project_id` 포함하여 워크로그 생성 |
-| `non-project` | `project_id` 없이 워크로그 생성 (업무유형만 지정) |
-| `personal` | 워크로그에서 제외 (동기화 스킵) |
+| type | Behavior |
+|------|----------|
+| `work` | Maps to an EOB project; worklog created with `project_id` |
+| `non-project` | Worklog created without `project_id` (work type only) |
+| `personal` | Excluded from sync entirely |
 
 ### Project Settings Storage
 
