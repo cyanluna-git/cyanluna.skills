@@ -361,7 +361,7 @@ curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
 # 3. Record commit hash in notes
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d "{\"content\": \"Commit: $COMMIT_HASH\"}"
+  -d "{\"text\": \"Commit: $COMMIT_HASH\"}"
 ```
 
 If no commits yet, skip note or record `"Commit: (none)"`.
