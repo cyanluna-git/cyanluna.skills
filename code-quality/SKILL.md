@@ -367,14 +367,15 @@ rm -rf stryker-tmp/ reports/
 Find unused exports, files, and dependencies. Complements mutation testing: a file with 100% mutation score but zero external references is dead code.
 
 ```bash
-# Auto-install knip if missing (dev dep only, no lock-file changes for temp use)
-if ! ls node_modules/knip &>/dev/null 2>&1; then
-  echo "Installing knip for dead code scan..."
-  pnpm add -D knip --silent
-fi
-
+# Use pnpm dlx to run knip without modifying package.json or pnpm-lock.yaml.
+# Falls back to already-installed local knip if present (faster).
 echo "=== Dead code scan (knip) ==="
-FORCE_COLOR=0 pnpm knip --reporter compact 2>&1 | tee /tmp/cq_knip.txt || true
+if ls node_modules/.bin/knip &>/dev/null 2>&1; then
+  KNIP_CMD="pnpm knip"
+else
+  KNIP_CMD="pnpm dlx knip"
+fi
+FORCE_COLOR=0 $KNIP_CMD --reporter compact 2>&1 | tee /tmp/cq_knip.txt || true
 
 # Parse and summarize
 python3 - << 'PY'
