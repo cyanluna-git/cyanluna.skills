@@ -33,18 +33,23 @@ Playwright + POM 구조만 추가. 이미 Vitest가 있을 때 사용.
 ```bash
 PM=$([ -f pnpm-lock.yaml ] && echo pnpm || [ -f yarn.lock ] && echo yarn || echo npm)
 
-FRAMEWORK=$(node -e "
-const p = require('./package.json');
-const deps = {...p.dependencies, ...p.devDependencies};
-if (deps['next']) console.log('nextjs');
-else if (deps['vite']) console.log('vite');
-else if (deps['react']) console.log('react');
-else console.log('node');
-" 2>/dev/null || echo "unknown")
+# python3으로 감지 — node require()는 ESM 프로젝트("type":"module")에서 실패함
+FRAMEWORK=$(python3 - << 'PY'
+import json
+try:
+    p = json.load(open("package.json"))
+    deps = {**p.get("dependencies", {}), **p.get("devDependencies", {})}
+    if "next" in deps: print("nextjs")
+    elif "vite" in deps: print("vite")
+    elif "react" in deps: print("react")
+    else: print("node")
+except Exception: print("unknown")
+PY
+)
 
-HAS_VITEST=$(grep -q '"vitest"' package.json && echo yes || echo no)
-HAS_JEST=$(grep -q '"jest"' package.json && echo yes || echo no)
-HAS_PLAYWRIGHT=$(grep -q '"@playwright/test"' package.json && echo yes || echo no)
+HAS_VITEST=$(python3 -c "import json; p=json.load(open('package.json')); print('yes' if 'vitest' in {**p.get('dependencies',{}),**p.get('devDependencies',{})} else 'no')")
+HAS_JEST=$(python3 -c "import json; p=json.load(open('package.json')); print('yes' if 'jest' in {**p.get('dependencies',{}),**p.get('devDependencies',{})} else 'no')")
+HAS_PLAYWRIGHT=$(python3 -c "import json; p=json.load(open('package.json')); print('yes' if '@playwright/test' in {**p.get('dependencies',{}),**p.get('devDependencies',{})} else 'no')")
 
 echo "Framework: $FRAMEWORK | PM: $PM"
 echo "Vitest: $HAS_VITEST | Jest: $HAS_JEST | Playwright: $HAS_PLAYWRIGHT"
@@ -67,6 +72,19 @@ $PM add -D vitest @vitejs/plugin-react jsdom \
 
 #### 2-B. `vitest.config.ts` 작성 (coverage threshold 포함)
 
+threshold는 기존 코드 규모에 따라 조정한다. 소스 파일이 많은 프로젝트에 처음부터 80%를 강제하면 첫 실행부터 실패한다.
+
+```bash
+# 기존 소스 파일 수 확인 → threshold 결정
+SRC_COUNT=$(find src -name "*.ts" -o -name "*.tsx" 2>/dev/null | grep -v '\.test\.' | grep -v '__tests__' | wc -l | tr -d ' ')
+if [ "$SRC_COUNT" -gt 20 ]; then
+  THRESHOLD=60  # 기존 코드 많음 → 60%부터 시작, 점진적으로 올릴 것
+else
+  THRESHOLD=80  # 신규 프로젝트 → 처음부터 80%
+fi
+echo "Coverage threshold: $THRESHOLD% (src files: $SRC_COUNT)"
+```
+
 ```ts
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
@@ -85,10 +103,12 @@ export default defineConfig({
       reporter: ['text', 'html'],
       exclude: ['**/node_modules/**', '**/.next/**', '**/e2e/**', '**/*.config.*'],
       thresholds: {
-        branches: 80,
-        functions: 80,
-        lines: 80,
-        statements: 80,
+        // 기존 코드 > 20 파일이면 60으로 시작, 신규는 80
+        // 안정화되면 숫자를 올려서 ratchet effect를 만든다
+        branches: $THRESHOLD,
+        functions: $THRESHOLD,
+        lines: $THRESHOLD,
+        statements: $THRESHOLD,
       },
     },
   },
@@ -97,6 +117,8 @@ export default defineConfig({
   },
 })
 ```
+
+> **Ratchet 원칙:** threshold는 내리지 않는다. 커버리지가 올라가면 숫자를 올리고, 절대 낮추지 않는다.
 
 #### 2-C. `vitest.setup.ts` 작성
 
@@ -133,16 +155,23 @@ import '@testing-library/jest-dom'
 
 #### 3-A. 테스트 대상 선정 (우선순위 순)
 
+아래 중 **존재하는 카테고리**에서 최소 3개 파일을 고른다. 없는 카테고리를 억지로 만들지 않는다.
+
 ```bash
-# 1. 커스텀 훅 (가장 테스트하기 쉬움)
-find src/hooks -name "*.ts" -not -name "*.test.ts" | head -5
-
-# 2. 순수 유틸 함수
-find src/lib src/utils -name "*.ts" -not -name "*.test.ts" | head -5
-
-# 3. UI 컴포넌트 (단순한 것부터)
-find src/components -name "*.tsx" -not -name "*.test.tsx" | head -5
+# 존재하는 카테고리 자동 탐지
+echo "=== 테스트 가능한 파일 ===" 
+[ -d src/hooks ]      && echo "[훅]"      && find src/hooks      -name "*.ts"  -not -name "*.test.*" | head -5
+[ -d src/lib ]        && echo "[유틸(lib)]" && find src/lib        -name "*.ts"  -not -name "*.test.*" | head -5
+[ -d src/utils ]      && echo "[유틸]"    && find src/utils      -name "*.ts"  -not -name "*.test.*" | head -5
+[ -d src/components ] && echo "[컴포넌트]" && find src/components  -name "*.tsx" -not -name "*.test.*" | head -5
+[ -d src/stores ]     && echo "[스토어]"  && find src/stores      -name "*.ts"  -not -name "*.test.*" | head -5
 ```
+
+선정 기준 (우선순위):
+1. **순수 함수 / 유틸** — 의존성 없어서 가장 쉬움
+2. **커스텀 훅** — jsdom으로 충분, renderHook으로 빠르게 테스트
+3. **클라이언트 컴포넌트** — `'use client'` 표시된 것만, 서버 컴포넌트는 스킵
+4. **Zustand / 상태 스토어** — 순수 함수처럼 단위 테스트 가능
 
 > **Next.js Server Component 제약:** `src/app` 내 서버 컴포넌트는 jsdom에서 직접 렌더 불가.
 > 유틸/훅/클라이언트 컴포넌트를 우선 테스트하고, 서버 컴포넌트 동작은 E2E로 커버한다.
@@ -260,17 +289,44 @@ $PM test 2>&1  # 여전히 PASS인지 확인
 git add -A && git commit -m "refactor: clean up <feature>"
 ```
 
-최소 3개 파일 (훅 1 + 유틸 1 + 컴포넌트 1)에 대해 사이클 완료.
+존재하는 카테고리 중 최소 3개 파일에 대해 사이클 완료.
 
 ---
 
 ### ④ Verify — 커버리지 확인
 
 ```bash
-$PM test:coverage 2>&1
+FORCE_COLOR=0 $PM test:coverage 2>&1 | tee /tmp/tdd_coverage.txt
 ```
 
-목표: `N passed`, 전체 커버리지 **80%+** (branches / functions / lines / statements).
+실제 수치를 파싱해서 출력에 반영한다:
+
+```bash
+python3 - << 'PY'
+import re, os
+
+text = open("/tmp/tdd_coverage.txt").read() if os.path.exists("/tmp/tdd_coverage.txt") else ""
+
+# vitest coverage text 출력에서 All files 행 파싱
+# 예: All files | 88.23 | 81.25 | 85.71 | 88.23 |
+m = re.search(r'All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)', text)
+if m:
+    stmt, branch, fn, line = m.groups()
+    passed = re.search(r'(\d+) passed', text)
+    n = passed.group(1) if passed else "?"
+    print(f"\n✅ {n} passed")
+    print(f"Coverage: statements {stmt}% / branches {branch}% / functions {fn}% / lines {line}%")
+    low = [(name, val) for name, val in [("statements", stmt), ("branches", branch), ("functions", fn), ("lines", line)] if float(val) < 80]
+    if low:
+        print(f"⚠ 미달: {', '.join(f'{n} {v}%' for n, v in low)}")
+    else:
+        print("✅ 모든 threshold 통과")
+else:
+    print("(coverage 수치 파싱 실패 — 위 로그 확인)")
+
+os.remove("/tmp/tdd_coverage.txt") if os.path.exists("/tmp/tdd_coverage.txt") else None
+PY
+```
 
 실패 시 오류별 수정:
 - **Module not found**: tsconfig paths / vitest alias 확인
@@ -313,33 +369,30 @@ test('updates item', () => {
 
 ## Output
 
-완료 후 출력:
+완료 후 실제 측정값을 포함해 출력한다 (④ Verify에서 파싱한 수치 사용):
 
 ```
 ✅ Vitest + Testing Library + @vitest/coverage-v8 설치
-✅ vitest.config.ts (coverage threshold 80%) / vitest.setup.ts 생성
+✅ vitest.config.ts (coverage threshold <THRESHOLD>%) / vitest.setup.ts 생성
 ✅ 테스트 스크립트 추가 (pnpm test / test:watch / test:coverage)
-✅ Red→Green→Refactor 3개 파일 완료 → N passed
-✅ Coverage: branches 82% / functions 85% / lines 88%
+✅ Red→Green→Refactor <N>개 파일 완료 → <passed> passed
+✅ Coverage: statements <X>% / branches <Y>% / functions <Z>% / lines <W>%
 
 📁 생성된 파일:
   vitest.config.ts
   vitest.setup.ts
-  src/hooks/__tests__/useXxx.test.ts       (RED→GREEN→Refactor)
-  src/lib/__tests__/utils.test.ts          (RED→GREEN→Refactor)
-  src/components/__tests__/Xxx.test.tsx    (RED→GREEN→Refactor)
+  <실제 테스트 파일 목록 — git diff HEAD~N --name-only로 확인>
 
-📌 Git checkpoints:
-  test: add failing test for useXxx
-  feat: implement useXxx (tests passing)
-  refactor: clean up useXxx
-  ... (파일별 3 commits)
+📌 Git checkpoints (git log --oneline -<N*3>):
+  <실제 커밋 메시지 목록>
 
 ▶ 다음 단계:
   pnpm test:watch    → 개발 중 실시간 실행
-  pnpm test:coverage → 커버리지 리포트 (htmlreporter → coverage/index.html)
+  pnpm test:coverage → 커버리지 리포트 (coverage/index.html)
   /tdd-setup e2e     → Playwright E2E + POM 구조 추가
 ```
+
+`<THRESHOLD>`, `<passed>`, `<X/Y/Z/W>%` 등은 하드코딩하지 않고 반드시 실제 측정값으로 채운다.
 
 ## Notes
 

@@ -101,12 +101,14 @@ export class HomePage {
 
   async goto() {
     await this.page.goto('/')
-    await this.page.waitForLoadState('networkidle')
+    // networkidle은 Next.js App Router에서 flaky — 첫 번째 의미있는 요소가 보일 때까지 대기
+    await expect(this.page.getByRole('main')).toBeVisible()
   }
 
   async filterByTrack(track: string) {
     await this.page.getByRole('button', { name: track }).click()
-    await this.page.waitForLoadState('networkidle')
+    // 필터 결과가 업데이트될 때까지 aria-live 영역 또는 카드가 stable해질 때 대기
+    await expect(this.resultCount).toBeAttached()
   }
 
   async getProjectCount() {
@@ -134,7 +136,7 @@ export class ProjectPage {
 
   async goto(slug: string) {
     await this.page.goto(`/projects/${slug}`)
-    await this.page.waitForLoadState('networkidle')
+    await expect(this.backLink).toBeVisible()
   }
 }
 ```
@@ -241,10 +243,16 @@ test.describe('Keyboard & A11y', () => {
 // ❌ 하드코딩된 sleep
 await page.waitForTimeout(600)
 
-// ✅ 네트워크 / 상태 완료 대기
-await page.waitForResponse(res => res.url().includes('/api/'))
+// ❌ networkidle — Next.js App Router / RSC streaming에서 resolve 안 되거나 timeout
 await page.waitForLoadState('networkidle')
-await expect(locator).toBeVisible()  // auto-retry 내장
+
+// ✅ 의미있는 요소가 보일 때까지 대기 (auto-retry 내장, flaky 없음)
+await expect(page.getByRole('main')).toBeVisible()
+await expect(locator).toBeVisible()
+await expect(locator).toBeAttached()
+
+// ✅ API 응답이 필요한 경우
+await page.waitForResponse(res => res.url().includes('/api/') && res.status() === 200)
 
 // ❌ CSS 클래스 선택자 (리팩터에 취약)
 await page.click('.css-xyz123')
