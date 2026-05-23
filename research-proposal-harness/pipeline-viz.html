@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Research Proposal Harness — Pipeline</title>
+<title>Research Proposal Harness — 파이프라인 시각화</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"/>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
@@ -18,65 +18,250 @@
   --script-bg: #FEF3C7;
   --connector: #CBD5E1;
   --feedback: #F43F5E;
+  --feedback-bg: #FFF1F2;
+  --feedback-border: #FECDD3;
+  --warning: #F59E0B;
+  --warning-bg: #FEF3C7;
   --bg: #F8FAFC;
+  --bg-alt: #F1F5F9;
   --surface: #FFFFFF;
   --border: #E2E8F0;
   --text: #0F172A;
   --text-secondary: #64748B;
+  --text-tertiary: #94A3B8;
   --radius: 12px;
+  --indigo: #6366F1;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
 body {
   font-family: 'Pretendard Variable', Pretendard, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ── Header ── */
 header {
-  background: linear-gradient(135deg, #1E293B 0%, #312E81 100%);
+  background: linear-gradient(135deg, #0F172A 0%, #312E81 50%, #4338CA 100%);
   color: white;
-  padding: 32px 40px 28px;
+  padding: 48px 48px 40px;
+  position: relative;
+  overflow: hidden;
 }
-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
-header p  { font-size: 13px; color: #94A3B8; margin-top: 6px; }
+header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 70% 30%, rgba(167,139,250,.25), transparent 50%),
+              radial-gradient(circle at 20% 80%, rgba(99,102,241,.2), transparent 50%);
+  pointer-events: none;
+}
+header .h-inner { position: relative; z-index: 1; max-width: 1400px; }
+.tagline {
+  display: inline-block;
+  font-size: 11px; font-weight: 600;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.2);
+  padding: 5px 12px; border-radius: 100px;
+  margin-bottom: 16px;
+  letter-spacing: .5px;
+  backdrop-filter: blur(8px);
+}
+header h1 {
+  font-size: 32px; font-weight: 800; letter-spacing: -0.5px;
+  line-height: 1.25;
+}
+header .h-sub {
+  font-size: 15px; color: #C7D2FE; margin-top: 10px;
+  line-height: 1.6; max-width: 720px;
+}
+
+/* ── Nav tabs ── */
+.tabs {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 48px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  gap: 8px;
+  box-shadow: 0 1px 0 var(--border);
+}
+.tab {
+  padding: 14px 18px;
+  font-size: 13px; font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.tab.active { color: var(--indigo); border-bottom-color: var(--indigo); }
+.tab:hover { color: var(--text); }
+
+/* ── Section ── */
+.section {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 56px 48px;
+}
+.section h2 {
+  font-size: 22px; font-weight: 700;
+  letter-spacing: -0.3px;
+  margin-bottom: 8px;
+}
+.section .s-sub {
+  font-size: 14px; color: var(--text-secondary);
+  margin-bottom: 32px;
+  line-height: 1.6;
+  max-width: 720px;
+}
+
+/* ── Purpose card ── */
+.purpose {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 32px;
+  margin-bottom: 40px;
+  position: relative;
+  overflow: hidden;
+}
+.purpose::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--indigo), #A78BFA);
+}
+.purpose h3 {
+  font-size: 13px; font-weight: 700;
+  color: var(--indigo);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.purpose p {
+  font-size: 15px; line-height: 1.8;
+  color: var(--text);
+}
+.purpose .highlight {
+  background: linear-gradient(180deg, transparent 60%, rgba(99,102,241,.15) 60%);
+  padding: 0 2px;
+  font-weight: 600;
+}
+
+/* ── 특장점 grid ── */
+.advantages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.advantage-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+  transition: transform .15s, box-shadow .15s, border-color .15s;
+}
+.advantage-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
+  border-color: var(--indigo);
+}
+.advantage-icon {
+  font-size: 24px;
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #EEF2FF, #E0E7FF);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.advantage-card h4 {
+  font-size: 14px; font-weight: 700;
+  margin-bottom: 6px;
+  letter-spacing: -0.2px;
+}
+.advantage-card p {
+  font-size: 12.5px; line-height: 1.65;
+  color: var(--text-secondary);
+}
+.advantage-card .kw {
+  color: var(--indigo); font-weight: 600;
+}
+
+/* ── Pipeline section ── */
+.pipeline-section {
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-alt) 100%);
+  padding: 56px 0;
+  border-top: 1px solid var(--border);
+}
 .legend {
-  display: flex; gap: 16px; flex-wrap: wrap; margin-top: 18px;
+  display: flex; gap: 18px; flex-wrap: wrap;
+  margin-bottom: 32px;
 }
 .legend-item {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: #CBD5E1;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--text-secondary);
 }
 .legend-dot {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 11px; height: 11px; border-radius: 50%;
 }
 
 /* ── Layout ── */
 .layout {
   display: grid;
-  grid-template-columns: 1fr 380px;
+  grid-template-columns: 1fr 400px;
   gap: 0;
-  min-height: calc(100vh - 120px);
+  position: relative;
 }
 
 /* ── Pipeline ── */
 .pipeline-wrap {
-  padding: 40px 0 60px;
-  overflow-x: auto;
+  position: relative;
+  padding: 0 0 60px;
+  overflow: visible;
 }
 .pipeline {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 480px;
   position: relative;
+  padding-right: 200px;  /* room for feedback arrows */
+}
+
+/* SVG feedback overlay */
+#feedback-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+#feedback-svg path { pointer-events: stroke; cursor: pointer; }
+.feedback-label {
+  position: absolute;
+  background: var(--feedback-bg);
+  border: 1px solid var(--feedback-border);
+  color: var(--feedback);
+  font-size: 10.5px; font-weight: 600;
+  padding: 3px 8px; border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: all;
+  cursor: help;
+  z-index: 6;
+}
+.feedback-label.warning {
+  background: var(--warning-bg);
+  border-color: #FCD34D;
+  color: #92400E;
 }
 
 /* ── Node ── */
 .node {
   position: relative;
-  width: 340px;
+  width: 360px;
   background: var(--surface);
   border: 1.5px solid var(--border);
   border-radius: var(--radius);
@@ -84,24 +269,41 @@ header p  { font-size: 13px; color: #94A3B8; margin-top: 6px; }
   cursor: pointer;
   transition: box-shadow .2s, transform .15s, border-color .2s;
   user-select: none;
+  z-index: 10;
 }
 .node:hover {
-  box-shadow: 0 4px 20px rgba(0,0,0,.10);
+  box-shadow: 0 6px 24px rgba(0,0,0,.10);
   transform: translateY(-1px);
+  border-color: #A5B4FC;
 }
 .node.active {
-  border-color: #6366F1;
-  box-shadow: 0 0 0 3px rgba(99,102,241,.15), 0 4px 20px rgba(0,0,0,.10);
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 4px rgba(99,102,241,.15), 0 6px 24px rgba(0,0,0,.12);
 }
-.node-header { display: flex; align-items: center; gap: 10px; }
-.node-icon { font-size: 20px; line-height: 1; }
-.node-title { font-size: 14px; font-weight: 600; }
-.node-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.node-header { display: flex; align-items: center; gap: 12px; }
+.node-icon {
+  font-size: 22px; line-height: 1;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.node-info { flex: 1; min-width: 0; }
+.node-title {
+  font-size: 14px; font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.node-subtitle {
+  font-size: 11.5px; color: var(--text-secondary);
+  margin-top: 3px; line-height: 1.4;
+}
 .node-badge {
-  margin-left: auto;
-  font-size: 11px; font-weight: 600;
-  padding: 3px 8px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700;
+  padding: 4px 9px; border-radius: 20px;
   white-space: nowrap;
+  letter-spacing: .3px;
+  flex-shrink: 0;
 }
 .badge-sonnet { background: var(--sonnet-bg); color: var(--sonnet); }
 .badge-opus   { background: var(--opus-bg);   color: var(--opus);   }
@@ -110,11 +312,10 @@ header p  { font-size: 13px; color: #94A3B8; margin-top: 6px; }
 
 /* Gate node */
 .node.gate {
-  width: 340px;
   background: linear-gradient(135deg, #ECFDF5, #F0FDF4);
   border-color: #6EE7B7;
-  border-radius: 8px;
 }
+.node.gate .node-icon { background: #D1FAE5; }
 .node.gate .node-title { color: #065F46; }
 
 /* DR Handoff */
@@ -123,12 +324,13 @@ header p  { font-size: 13px; color: #94A3B8; margin-top: 6px; }
   border-color: #93C5FD;
   border-style: dashed;
 }
+.node.handoff .node-icon { background: #DBEAFE; }
 .node.handoff .node-title { color: #1D4ED8; }
 
 /* ── Connectors ── */
 .connector {
-  width: 2px;
-  height: 28px;
+  width: 2.5px;
+  height: 32px;
   background: linear-gradient(180deg, var(--connector) 0%, var(--connector) 100%);
   position: relative;
   overflow: visible;
@@ -136,61 +338,35 @@ header p  { font-size: 13px; color: #94A3B8; margin-top: 6px; }
 .connector::after {
   content: '';
   position: absolute;
-  bottom: -4px; left: -4px;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 7px solid var(--connector);
+  bottom: -3px; left: -4px;
+  border-left: 5.5px solid transparent;
+  border-right: 5.5px solid transparent;
+  border-top: 8px solid var(--connector);
 }
-.connector.animated {
-  background: linear-gradient(180deg, var(--connector) 0%, #6366F1 100%);
-}
-
-/* Output tag on connector */
 .connector-label {
   position: absolute;
-  left: 10px; top: 50%; transform: translateY(-50%);
-  font-size: 10px; color: var(--text-secondary);
-  background: var(--bg); padding: 1px 5px; border-radius: 4px;
+  left: 18px; top: 50%; transform: translateY(-50%);
+  font-size: 10.5px; color: var(--text-secondary);
+  background: var(--bg-alt); padding: 2px 7px; border-radius: 5px;
   white-space: nowrap;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-/* ── Feedback loops ── */
-.feedback-group {
-  position: absolute;
-  right: -120px; top: 0;
-  width: 110px;
-  pointer-events: none;
-}
-.feedback-line {
-  position: absolute;
-  right: 0;
-  border-right: 2px dashed var(--feedback);
-  border-radius: 0 8px 8px 0;
-}
-.feedback-arrow {
-  position: absolute;
-  right: -5px;
-  font-size: 11px; color: var(--feedback);
-}
-.feedback-tag {
-  position: absolute;
-  right: 8px;
-  font-size: 10px; color: var(--feedback);
-  background: #FFF1F2; border: 1px solid #FECDD3;
-  padding: 2px 6px; border-radius: 4px;
-  white-space: nowrap;
-  pointer-events: all;
-}
-
-/* ── Section label ── */
+/* Section label inside pipeline */
 .section-label {
-  width: 340px;
-  font-size: 11px; font-weight: 600; color: var(--text-secondary);
-  text-transform: uppercase; letter-spacing: 0.8px;
-  padding: 0 4px 8px;
+  width: 360px;
+  font-size: 10.5px; font-weight: 700; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 1.2px;
+  padding: 0 4px 10px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
+  margin: 24px 0 22px;
+  display: flex; align-items: center; gap: 8px;
 }
+.section-label::before {
+  content: ''; width: 6px; height: 6px;
+  background: var(--indigo); border-radius: 50%;
+}
+.section-label:first-child { margin-top: 0; }
 
 /* ── Detail panel ── */
 .detail-panel {
@@ -198,335 +374,658 @@ header p  { font-size: 13px; color: #94A3B8; margin-top: 6px; }
   border-left: 1px solid var(--border);
   padding: 32px 28px;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 50px;
+  height: calc(100vh - 50px);
   overflow-y: auto;
 }
+.dp-type {
+  font-size: 10.5px; font-weight: 700;
+  color: var(--indigo);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
 .detail-panel h2 {
-  font-size: 16px; font-weight: 700; margin-bottom: 4px;
+  font-size: 18px; font-weight: 700; margin-bottom: 6px;
+  letter-spacing: -0.3px;
 }
 .detail-panel .dp-subtitle {
-  font-size: 12px; color: var(--text-secondary); margin-bottom: 20px;
+  font-size: 13px; color: var(--text-secondary); margin-bottom: 24px;
+  line-height: 1.55;
 }
-.dp-section {
-  margin-bottom: 20px;
-}
+.dp-section { margin-bottom: 22px; }
 .dp-section h3 {
-  font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.6px; color: var(--text-secondary);
-  margin-bottom: 8px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-tertiary);
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.dp-section h3::before {
+  content: ''; width: 4px; height: 4px;
+  background: var(--text-tertiary); border-radius: 50%;
 }
 .dp-section p, .dp-section li {
-  font-size: 13px; line-height: 1.7; color: var(--text);
+  font-size: 13px; line-height: 1.75; color: var(--text);
 }
-.dp-section ul { padding-left: 16px; }
-.dp-section li { margin-bottom: 4px; }
+.dp-section ul { padding-left: 18px; }
+.dp-section li { margin-bottom: 5px; }
 .dp-schema {
-  background: #F1F5F9; border-radius: 8px;
-  padding: 10px 14px; font-size: 12px;
-  font-family: 'JetBrains Mono', monospace;
-  line-height: 1.6; color: #334155;
+  background: #0F172A;
+  color: #E2E8F0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 11.5px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  line-height: 1.65;
   overflow-x: auto;
+  white-space: pre;
 }
 .empty-state {
   color: var(--text-secondary);
   font-size: 13px; line-height: 1.7;
-  margin-top: 40px; text-align: center;
+  margin-top: 60px; text-align: center;
 }
-.empty-state .big { font-size: 32px; display: block; margin-bottom: 12px; }
+.empty-state .big {
+  font-size: 40px; display: block; margin-bottom: 16px;
+}
 
-/* ── Output node ── */
+/* Output node */
 .output-node {
-  width: 340px;
-  background: linear-gradient(135deg, #1E293B, #312E81);
+  width: 360px;
+  background: linear-gradient(135deg, #0F172A, #312E81);
   border-radius: var(--radius);
-  padding: 16px 20px;
+  padding: 18px 22px;
   color: white;
+  position: relative;
+  z-index: 10;
 }
-.output-node .o-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: #E2E8F0; }
-.output-files { display: flex; flex-direction: column; gap: 7px; }
+.output-node .o-title {
+  font-size: 11px; font-weight: 700; margin-bottom: 12px;
+  color: #C7D2FE;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.output-files { display: flex; flex-direction: column; gap: 8px; }
 .output-file {
-  display: flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,.08); border-radius: 6px;
-  padding: 7px 10px; font-size: 12px;
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.08);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
 }
-.output-file .ext { font-family: monospace; font-weight: 700; color: #A5B4FC; font-size: 11px; }
+.output-file .ext {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700; color: #A5B4FC;
+  font-size: 11px;
+  min-width: 30px;
+}
+
+/* Loop section */
+.loop-diagram {
+  background: var(--surface);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  padding: 32px;
+  margin-bottom: 32px;
+}
+.loop-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+.loop-card {
+  background: var(--feedback-bg);
+  border: 1px solid var(--feedback-border);
+  border-radius: 10px;
+  padding: 18px;
+}
+.loop-card.warning { background: var(--warning-bg); border-color: #FCD34D; }
+.loop-card .loop-flow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--feedback);
+  margin-bottom: 8px;
+}
+.loop-card.warning .loop-flow { color: #92400E; }
+.loop-card .loop-trigger {
+  font-size: 12px; font-weight: 600;
+  margin-bottom: 6px;
+}
+.loop-card .loop-desc {
+  font-size: 12px; color: var(--text-secondary);
+  line-height: 1.6;
+}
+.loop-card .loop-limit {
+  font-size: 11px; color: var(--text-tertiary);
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--feedback-border);
+}
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .layout { grid-template-columns: 1fr; }
   .detail-panel { display: none; }
+  .pipeline { padding-right: 180px; }
 }
+@media (max-width: 768px) {
+  header { padding: 32px 24px; }
+  .section { padding: 40px 24px; }
+  .tabs { padding: 0 24px; }
+  header h1 { font-size: 24px; }
+  .pipeline { padding-right: 0; }
+  #feedback-svg, .feedback-label { display: none; }
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% { opacity: .4; }
+  50% { opacity: 1; }
+}
+@keyframes flow {
+  0% { stroke-dashoffset: 20; }
+  100% { stroke-dashoffset: 0; }
+}
+.feedback-path { animation: flow 2s linear infinite; }
+
 </style>
 </head>
 <body x-data="pipeline()">
 
+<!-- ── Header ── -->
 <header>
-  <h1>Research Proposal Harness</h1>
-  <p>aSSIST MBA 논문 연구계획서 자동화 파이프라인 — 자유형식 아이디어 → 검증된 계획서 초안</p>
-  <div class="legend">
-    <div class="legend-item"><div class="legend-dot" style="background:var(--sonnet)"></div>Sonnet 4.6 — 작업 수행</div>
-    <div class="legend-item"><div class="legend-dot" style="background:var(--opus)"></div>Opus 4.7 — 분석·판단</div>
-    <div class="legend-item"><div class="legend-dot" style="background:var(--human)"></div>Human Gate — 검토 승인</div>
-    <div class="legend-item"><div class="legend-dot" style="background:var(--script)"></div>Script — 자동 변환</div>
-    <div class="legend-item"><div class="legend-dot" style="background:var(--feedback)"></div>피드백 루프</div>
+  <div class="h-inner">
+    <span class="tagline">aSSIST MBA · Research Automation</span>
+    <h1>Research Proposal Harness</h1>
+    <p class="h-sub">
+      자유형식 아이디어 텍스트를 입력하면, 검증된 선행연구 분석과 함께
+      aSSIST MBA 양식에 맞는 연구계획서 초안을 자동 생성하는
+      6단계 멀티 에이전트 파이프라인.
+    </p>
   </div>
 </header>
 
-<div class="layout">
-  <!-- ── Pipeline ── -->
-  <div class="pipeline-wrap">
-    <div class="pipeline" id="pipeline">
-
-      <!-- INPUT -->
-      <div class="section-label">입력</div>
-      <div class="node" :class="{active: selected==='input'}" @click="select('input')">
-        <div class="node-header">
-          <div class="node-icon">✍️</div>
-          <div>
-            <div class="node-title">자유형식 아이디어</div>
-            <div class="node-subtitle">한국어·영어 혼용 텍스트</div>
-          </div>
-          <span class="node-badge badge-human">User</span>
-        </div>
-      </div>
-
-      <div class="connector animated"><span class="connector-label">idea text</span></div>
-
-      <!-- A1 -->
-      <div class="section-label" style="margin-top:8px">에이전트 레이어</div>
-      <div class="node" :class="{active: selected==='a1'}" @click="select('a1')">
-        <div class="node-header">
-          <div class="node-icon">🔬</div>
-          <div>
-            <div class="node-title">Agent 1 — 가설 정제</div>
-            <div class="node-subtitle">독립변수·종속변수·대상·지표 구조화</div>
-          </div>
-          <span class="node-badge badge-sonnet">Sonnet</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">agent1_output.json</span></div>
-
-      <!-- GATE 1 -->
-      <div class="node gate" :class="{active: selected==='gate1'}" @click="select('gate1')">
-        <div class="node-header">
-          <div class="node-icon">🚦</div>
-          <div>
-            <div class="node-title">Gate 1 — 가설 검토</div>
-            <div class="node-subtitle">승인 / 수정 / 반려 · 중복 위험 시 대안 선택</div>
-          </div>
-          <span class="node-badge badge-human">Human ①</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">approved</span></div>
-
-      <!-- A2 domestic -->
-      <div class="node" :class="{active: selected==='a2'}" @click="select('a2')">
-        <div class="node-header">
-          <div class="node-icon">🔍</div>
-          <div>
-            <div class="node-title">Agent 2 — 국내 수집</div>
-            <div class="node-subtitle">KCI · RISS via Exa</div>
-          </div>
-          <span class="node-badge badge-sonnet">Sonnet</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">Deep Research 프롬프트 출력 →</span></div>
-
-      <!-- DR Handoff -->
-      <div class="node handoff" :class="{active: selected==='dr'}" @click="select('dr')">
-        <div class="node-header">
-          <div class="node-icon">🌐</div>
-          <div>
-            <div class="node-title">Deep Research 핸드오프</div>
-            <div class="node-subtitle">Gemini 실행 후 리포트 붙여넣기</div>
-          </div>
-          <span class="node-badge badge-human">Human</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">DR report text</span></div>
-
-      <!-- A2 parser -->
-      <div class="node" :class="{active: selected==='parser'}" @click="select('parser')">
-        <div class="node-header">
-          <div class="node-icon">⚙️</div>
-          <div>
-            <div class="node-title">A2-DR Parser — 리포트 파싱</div>
-            <div class="node-subtitle">국내+국제 병합 · 중복 제거 · 3단계 스크리닝</div>
-          </div>
-          <span class="node-badge badge-sonnet">Sonnet</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">agent2_output.json</span></div>
-
-      <!-- VA -->
-      <div class="node" style="position:relative" :class="{active: selected==='va'}" @click="select('va')">
-        <div class="node-header">
-          <div class="node-icon">✅</div>
-          <div>
-            <div class="node-title">Validator A — 출처 검증</div>
-            <div class="node-subtitle">URL 생존 · 게재지 신뢰도 · 메타데이터 · 중복</div>
-          </div>
-          <span class="node-badge badge-opus">Opus</span>
-        </div>
-        <!-- feedback tag -->
-        <div style="position:absolute;right:-128px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--feedback);background:#FFF1F2;border:1px solid #FECDD3;padding:3px 7px;border-radius:4px;white-space:nowrap;">
-          final_count &lt; 5 → A2 재수집
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">validator_a_output.json</span></div>
-
-      <!-- A3 -->
-      <div class="node" :class="{active: selected==='a3'}" @click="select('a3')">
-        <div class="node-header">
-          <div class="node-icon">📊</div>
-          <div>
-            <div class="node-title">Agent 3 — 논문 분석</div>
-            <div class="node-subtitle">연구 흐름 · 방법론 분포 · 유사도 · Gap 도출 · 실행 가능성</div>
-          </div>
-          <span class="node-badge badge-opus">Opus</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">agent3_output.json</span></div>
-
-      <!-- VB -->
-      <div class="node" :class="{active: selected==='vb'}" @click="select('vb')">
-        <div class="node-header">
-          <div class="node-icon">🔎</div>
-          <div>
-            <div class="node-title">Validator B — 근거 검증</div>
-            <div class="node-subtitle">클레임-초록 교차검증 · 할루시네이션 탐지 · BibTeX 검증</div>
-          </div>
-          <span class="node-badge badge-opus">Opus</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">validator_b_output.json</span></div>
-
-      <!-- A4 -->
-      <div class="node" :class="{active: selected==='a4'}" @click="select('a4')">
-        <div class="node-header">
-          <div class="node-icon">📝</div>
-          <div>
-            <div class="node-title">Agent 4 — 계획서 작성</div>
-            <div class="node-subtitle">aSSIST 6섹션 초안 · 한국어 학술 문체</div>
-          </div>
-          <span class="node-badge badge-sonnet">Sonnet</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">proposal_draft.md · references.bib</span></div>
-
-      <!-- GATE 2 -->
-      <div class="node gate" :class="{active: selected==='gate2'}" @click="select('gate2')">
-        <div class="node-header">
-          <div class="node-icon">🚦</div>
-          <div>
-            <div class="node-title">Gate 2 — 초안 검토</div>
-            <div class="node-subtitle">승인 / 섹션 단위 수정 / 전면 재작성</div>
-          </div>
-          <span class="node-badge badge-human">Human ②</span>
-        </div>
-      </div>
-      <div class="connector"><span class="connector-label">approved</span></div>
-
-      <!-- convert.sh -->
-      <div class="node" :class="{active: selected==='convert'}" @click="select('convert')">
-        <div class="node-header">
-          <div class="node-icon">⚡</div>
-          <div>
-            <div class="node-title">convert.sh — 문서 변환</div>
-            <div class="node-subtitle">pandoc + xelatex (또는 Overleaf ZIP)</div>
-          </div>
-          <span class="node-badge badge-script">Script</span>
-        </div>
-      </div>
-
-      <div class="connector"></div>
-
-      <!-- OUTPUT -->
-      <div class="output-node">
-        <div class="o-title">최종 산출물</div>
-        <div class="output-files">
-          <div class="output-file"><span class="ext">PDF</span> proposal_draft.pdf — 제출용 최종본</div>
-          <div class="output-file"><span class="ext">ZIP</span> proposal_draft_overleaf.zip — Overleaf 업로드용</div>
-          <div class="output-file"><span class="ext">HTML</span> proposal_draft.html — 로컬 미리보기</div>
-          <div class="output-file"><span class="ext">BIB</span> references.bib — 검증된 인용 목록</div>
-        </div>
-      </div>
-
-    </div><!-- /pipeline -->
-  </div><!-- /pipeline-wrap -->
-
-  <!-- ── Detail Panel ── -->
-  <div class="detail-panel">
-    <template x-if="!selected">
-      <div class="empty-state">
-        <span class="big">👆</span>
-        노드를 클릭하면<br>상세 정보가 표시됩니다
-      </div>
-    </template>
-
-    <template x-if="selected">
-      <div>
-        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px" x-text="nodes[selected].type"></div>
-        <h2 x-text="nodes[selected].title"></h2>
-        <div class="dp-subtitle" x-text="nodes[selected].subtitle"></div>
-
-        <template x-if="nodes[selected].model">
-          <div class="dp-section">
-            <h3>모델</h3>
-            <p x-text="nodes[selected].model"></p>
-          </div>
-        </template>
-
-        <template x-if="nodes[selected].input">
-          <div class="dp-section">
-            <h3>입력</h3>
-            <div class="dp-schema" x-text="nodes[selected].input"></div>
-          </div>
-        </template>
-
-        <template x-if="nodes[selected].output">
-          <div class="dp-section">
-            <h3>출력</h3>
-            <div class="dp-schema" x-text="nodes[selected].output"></div>
-          </div>
-        </template>
-
-        <template x-if="nodes[selected].details">
-          <div class="dp-section">
-            <h3>주요 처리</h3>
-            <ul>
-              <template x-for="d in nodes[selected].details">
-                <li x-text="d"></li>
-              </template>
-            </ul>
-          </div>
-        </template>
-
-        <template x-if="nodes[selected].feedback">
-          <div class="dp-section">
-            <h3>피드백 루프</h3>
-            <ul>
-              <template x-for="f in nodes[selected].feedback">
-                <li x-text="f"></li>
-              </template>
-            </ul>
-          </div>
-        </template>
-      </div>
-    </template>
-  </div>
+<!-- ── Tabs ── -->
+<div class="tabs">
+  <div class="tab" :class="{active: tab==='intro'}" @click="tab='intro'">개요 · 특장점</div>
+  <div class="tab" :class="{active: tab==='pipeline'}" @click="tab='pipeline'">파이프라인</div>
+  <div class="tab" :class="{active: tab==='loops'}" @click="tab='loops'">피드백 루프</div>
 </div>
+
+<!-- ── 1. Intro ── -->
+<section class="section" x-show="tab==='intro'">
+  <h2>하네스의 목적</h2>
+  <p class="s-sub">MBA 연구계획서 작성 과정에서 누적되는 4가지 병목을 단일 파이프라인으로 해소한다.</p>
+
+  <div class="purpose">
+    <h3>왜 이 하네스가 필요한가</h3>
+    <p>
+      MBA 연구계획서 작성은 <span class="highlight">변수 정의의 모호함</span>,
+      <span class="highlight">선행연구 4개 소스 수동 탐색</span>,
+      <span class="highlight">출처 신빙성 검증</span>,
+      <span class="highlight">독창성·중복 판단</span> 4단계에서 매번 반나절~하루의 시간을 소모한다.
+      각 단계의 누적 오류는 지도교수 신뢰도 문제와 계획서 반려로 이어진다.
+      이 하네스는 <strong>가설 정제부터 PDF 생성까지 자동화</strong>하면서,
+      <strong>두 번의 인간 검토 게이트와 두 단계 자동 검증 레이어</strong>로
+      품질을 확보한다. 연구자가 직접 개입하는 시간은 단 두 번 — 가설 확인과 초안 검토.
+    </p>
+  </div>
+
+  <h2 style="margin-top:48px">핵심 특장점</h2>
+  <p class="s-sub">단일 LLM 호출이나 일반 검색 도구로는 달성하기 어려운 8가지 차별점.</p>
+
+  <div class="advantages-grid">
+    <div class="advantage-card">
+      <div class="advantage-icon">🛡️</div>
+      <h4>2단계 자동 검증 시스템</h4>
+      <p>
+        <span class="kw">Validator A</span>는 출처 신빙성(URL·게재지·메타데이터),
+        <span class="kw">Validator B</span>는 클레임-근거 정합성을 교차 검증.
+        탐지된 할루시네이션은 <code>blocked_claims</code>로 하드 블록되어
+        최종 계획서 어디에도 사용되지 않는다.
+      </p>
+    </div>
+
+    <div class="advantage-card">
+      <div class="advantage-icon">🌐</div>
+      <h4>하이브리드 선행연구 탐색</h4>
+      <p>
+        국내 <span class="kw">KCI·RISS</span>는 Exa로 직접 크롤링,
+        국제 논문은 <span class="kw">Google Deep Research</span>로 multi-step
+        autonomous research를 위임한다. 단일 검색 도구로는 닿지 못하는
+        방대한 학술 소스를 통합 수집한다.
+      </p>
+    </div>
+
+    <div class="advantage-card">
+      <div class="advantage-icon">🎓</div>
+      <h4>MBA 연구 특화 분석</h4>
+      <p>
+        <span class="kw">aSSIST 6섹션</span> 양식에 자동 매핑,
+        RBV·TAM·TQM 등 <span class="kw">MBA 핵심 이론</span> 필수 연결,
+        양적 연구 시 <span class="kw">통계적 검정력 분석</span>을 자동 포함.
+        일반 학술 글쓰기 도구와 본질적으로 다르다.
+      </p>
+    </div>
+
+    <div class="advantage-card">
+      <div class="advantage-icon">⚙️</div>
+      <h4>실행 가능성 자동 점검</h4>
+      <p>
+        <span class="kw">데이터 수집 가능성 · 표본 크기 · 방법론 복잡도 · 일정</span>
+        4축을 자동 평가하여 green/yellow/red로 등급화.
+        비현실적인 연구 계획을 사전에 차단하고 완화 방안을 제시한다.
+      </p>
+    </div>
+
+    <div class="advantage-card">
+      <div class="advantage-icon">🔄</div>
+      <h4>자동 피드백 루프 4종</h4>
+      <p>
+        통과 논문 부족 시 <span class="kw">자동 재수집</span>,
+        가설 중복 위험 시 <span class="kw">대안 3개 자동 생성</span>,
+        근거 신뢰도 저하 시 <span class="kw">분석 재실행</span>,
+        섹션별 부분 재작성. 인간이 매번 지시하지 않아도 스스로 보정한다.
+      </p>
+    </div>
+
+    <div class="advantage-card">
+      <div class="advantage-icon">⚡</div>
+      <h4>모델 분업 최적화</h4>
+      <p>
+        구조화·작성은 <span class="kw">Sonnet 4.6</span>(속도),
+        판단·추론·할루시네이션 탐지는 <span class="kw">Opus 4.7</span>(정확도).
+        전 단계를 Opus로 돌리는 것보다 30~40% 저렴하면서도
+        검증 품질은 유지한다.
+      </p>
+    </div>
+
+    <div class="advantage-card">
+      <div class="advantage-icon">✅</div>
+      <h4>할루시네이션 방지 다중 레이어</h4>
+      <p>
+        <span class="kw">클레임-초록 교차검증</span>으로 가짜 인용 차단,
+        <span class="kw">BibTeX 메타데이터 검증</span>으로 et al./Unknown/하이픈
+        오류 사전 검출, 프리프린트 출처는 자동 명시.
+        지도교수가 인용을 검토할 필요 없는 수준의 정확도.
+      </p>
+    </div>
+
+    <div class="advantage-card">
+      <div class="advantage-icon">📦</div>
+      <h4>즉시 사용 가능한 산출물</h4>
+      <p>
+        <span class="kw">xelatex로 직접 PDF</span>(setup-latex.sh 실행 시),
+        없으면 <span class="kw">Overleaf ZIP 자동 폴백</span>.
+        HTML 미리보기 + references.bib까지 동시 생성. aSSIST 양식
+        100% 준수, NanumMyeongjo·kotex·indentfirst 설정 완료.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── 2. Pipeline ── -->
+<section x-show="tab==='pipeline'" style="padding:0">
+  <div class="section" style="padding-bottom:24px">
+    <h2>전체 파이프라인</h2>
+    <p class="s-sub">노드를 클릭하면 우측 패널에 상세 정보(모델·입출력 스키마·처리 단계·피드백 루프)가 표시됩니다. 점선 곡선은 자동 피드백 루프를 나타냅니다.</p>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--sonnet)"></div>Sonnet 4.6 — 작업 수행</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--opus)"></div>Opus 4.7 — 분석·판단</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--human)"></div>Human Gate — 검토 승인</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--script)"></div>Script — 자동 변환</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--feedback)"></div>피드백 루프 (자동)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--warning)"></div>피드백 루프 (게이트 복귀)</div>
+    </div>
+  </div>
+
+  <div class="pipeline-section" style="padding:0">
+    <div class="layout">
+      <div class="pipeline-wrap">
+        <div class="pipeline" id="pipeline">
+
+          <svg id="feedback-svg"></svg>
+
+          <!-- INPUT -->
+          <div class="section-label">입력</div>
+          <div class="node" data-node="input" :class="{active: selected==='input'}" @click="select('input')">
+            <div class="node-header">
+              <div class="node-icon">✍️</div>
+              <div class="node-info">
+                <div class="node-title">자유형식 아이디어</div>
+                <div class="node-subtitle">한국어·영어 혼용 텍스트 — 변수 불명확해도 됨</div>
+              </div>
+              <span class="node-badge badge-human">User</span>
+            </div>
+          </div>
+
+          <div class="connector"><span class="connector-label">idea text</span></div>
+
+          <!-- A1 -->
+          <div class="section-label">에이전트 레이어</div>
+          <div class="node" data-node="a1" :class="{active: selected==='a1'}" @click="select('a1')">
+            <div class="node-header">
+              <div class="node-icon">🔬</div>
+              <div class="node-info">
+                <div class="node-title">A1 — 가설 정제</div>
+                <div class="node-subtitle">변수·대상·지표 6요소 구조화 + DR 프롬프트 생성</div>
+              </div>
+              <span class="node-badge badge-sonnet">Sonnet</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">agent1_output.json</span></div>
+
+          <!-- GATE 1 -->
+          <div class="node gate" data-node="gate1" :class="{active: selected==='gate1'}" @click="select('gate1')">
+            <div class="node-header">
+              <div class="node-icon">🚦</div>
+              <div class="node-info">
+                <div class="node-title">Gate 1 — 가설 검토</div>
+                <div class="node-subtitle">승인 / 수정 / 반려 · 중복 위험 시 대안 선택</div>
+              </div>
+              <span class="node-badge badge-human">Human ①</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">approved</span></div>
+
+          <!-- A2 domestic -->
+          <div class="node" data-node="a2" :class="{active: selected==='a2'}" @click="select('a2')">
+            <div class="node-header">
+              <div class="node-icon">🔍</div>
+              <div class="node-info">
+                <div class="node-title">A2 — 국내 수집</div>
+                <div class="node-subtitle">KCI · RISS via Exa web search</div>
+              </div>
+              <span class="node-badge badge-sonnet">Sonnet</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">DR 프롬프트 출력 →</span></div>
+
+          <!-- DR Handoff -->
+          <div class="node handoff" data-node="dr" :class="{active: selected==='dr'}" @click="select('dr')">
+            <div class="node-header">
+              <div class="node-icon">🌐</div>
+              <div class="node-info">
+                <div class="node-title">Deep Research 핸드오프</div>
+                <div class="node-subtitle">Gemini에서 실행 → 리포트 붙여넣기</div>
+              </div>
+              <span class="node-badge badge-human">Human</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">DR report text</span></div>
+
+          <!-- A2 parser -->
+          <div class="node" data-node="parser" :class="{active: selected==='parser'}" @click="select('parser')">
+            <div class="node-header">
+              <div class="node-icon">⚙️</div>
+              <div class="node-info">
+                <div class="node-title">A2-DR Parser — 병합·스크리닝</div>
+                <div class="node-subtitle">메타데이터 추출 · 중복 제거 · 3단계 스크리닝</div>
+              </div>
+              <span class="node-badge badge-sonnet">Sonnet</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">agent2_output.json</span></div>
+
+          <!-- VA -->
+          <div class="section-label">검증 레이어</div>
+          <div class="node" data-node="va" :class="{active: selected==='va'}" @click="select('va')">
+            <div class="node-header">
+              <div class="node-icon">✅</div>
+              <div class="node-info">
+                <div class="node-title">Validator A — 출처 검증</div>
+                <div class="node-subtitle">URL 생존 · 게재지 신뢰도 · 메타데이터</div>
+              </div>
+              <span class="node-badge badge-opus">Opus</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">validator_a_output.json</span></div>
+
+          <!-- A3 -->
+          <div class="node" data-node="a3" :class="{active: selected==='a3'}" @click="select('a3')">
+            <div class="node-header">
+              <div class="node-icon">📊</div>
+              <div class="node-info">
+                <div class="node-title">A3 — 논문 분석·Gap 도출</div>
+                <div class="node-subtitle">4계층 분석 + 중복 위험 + 실행 가능성</div>
+              </div>
+              <span class="node-badge badge-opus">Opus</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">agent3_output.json</span></div>
+
+          <!-- VB -->
+          <div class="node" data-node="vb" :class="{active: selected==='vb'}" @click="select('vb')">
+            <div class="node-header">
+              <div class="node-icon">🔎</div>
+              <div class="node-info">
+                <div class="node-title">Validator B — 근거 검증</div>
+                <div class="node-subtitle">할루시네이션 탐지 + blocked_claims + BibTeX</div>
+              </div>
+              <span class="node-badge badge-opus">Opus</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">validator_b_output.json</span></div>
+
+          <!-- A4 -->
+          <div class="section-label">계획서 작성</div>
+          <div class="node" data-node="a4" :class="{active: selected==='a4'}" @click="select('a4')">
+            <div class="node-header">
+              <div class="node-icon">📝</div>
+              <div class="node-info">
+                <div class="node-title">A4 — 계획서 작성</div>
+                <div class="node-subtitle">aSSIST 6섹션 초안 · 한국어 학술 문체</div>
+              </div>
+              <span class="node-badge badge-sonnet">Sonnet</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">proposal_draft.md · references.bib</span></div>
+
+          <!-- GATE 2 -->
+          <div class="node gate" data-node="gate2" :class="{active: selected==='gate2'}" @click="select('gate2')">
+            <div class="node-header">
+              <div class="node-icon">🚦</div>
+              <div class="node-info">
+                <div class="node-title">Gate 2 — 초안 검토</div>
+                <div class="node-subtitle">승인 / 섹션 수정 / 전면 재작성</div>
+              </div>
+              <span class="node-badge badge-human">Human ②</span>
+            </div>
+          </div>
+          <div class="connector"><span class="connector-label">approved</span></div>
+
+          <!-- convert.sh -->
+          <div class="node" data-node="convert" :class="{active: selected==='convert'}" @click="select('convert')">
+            <div class="node-header">
+              <div class="node-icon">⚡</div>
+              <div class="node-info">
+                <div class="node-title">convert.sh — 문서 변환</div>
+                <div class="node-subtitle">xelatex 감지 → PDF / 폴백 → Overleaf ZIP</div>
+              </div>
+              <span class="node-badge badge-script">Script</span>
+            </div>
+          </div>
+          <div class="connector"></div>
+
+          <!-- OUTPUT -->
+          <div class="output-node">
+            <div class="o-title">최종 산출물</div>
+            <div class="output-files">
+              <div class="output-file"><span class="ext">PDF</span> proposal_draft.pdf — 제출용 최종본</div>
+              <div class="output-file"><span class="ext">ZIP</span> proposal_draft_overleaf.zip — Overleaf 업로드용</div>
+              <div class="output-file"><span class="ext">HTML</span> proposal_draft.html — 로컬 미리보기</div>
+              <div class="output-file"><span class="ext">BIB</span> references.bib — 검증된 인용 목록</div>
+            </div>
+          </div>
+
+        </div><!-- /pipeline -->
+      </div><!-- /pipeline-wrap -->
+
+      <!-- Detail Panel -->
+      <div class="detail-panel">
+        <template x-if="!selected">
+          <div class="empty-state">
+            <span class="big">👆</span>
+            노드를 클릭하면<br>상세 정보가 표시됩니다
+          </div>
+        </template>
+
+        <template x-if="selected">
+          <div>
+            <div class="dp-type" x-text="nodes[selected].type"></div>
+            <h2 x-text="nodes[selected].title"></h2>
+            <div class="dp-subtitle" x-text="nodes[selected].subtitle"></div>
+
+            <template x-if="nodes[selected].model">
+              <div class="dp-section">
+                <h3>모델</h3>
+                <p style="font-family:'JetBrains Mono',monospace;font-size:12.5px" x-text="nodes[selected].model"></p>
+              </div>
+            </template>
+
+            <template x-if="nodes[selected].input">
+              <div class="dp-section">
+                <h3>입력</h3>
+                <div class="dp-schema" x-text="nodes[selected].input"></div>
+              </div>
+            </template>
+
+            <template x-if="nodes[selected].output">
+              <div class="dp-section">
+                <h3>출력</h3>
+                <div class="dp-schema" x-text="nodes[selected].output"></div>
+              </div>
+            </template>
+
+            <template x-if="nodes[selected].details">
+              <div class="dp-section">
+                <h3>주요 처리</h3>
+                <ul>
+                  <template x-for="d in nodes[selected].details">
+                    <li x-text="d"></li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+
+            <template x-if="nodes[selected].feedback">
+              <div class="dp-section">
+                <h3>관련 피드백 루프</h3>
+                <ul>
+                  <template x-for="f in nodes[selected].feedback">
+                    <li x-text="f"></li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 3. Feedback Loops ── -->
+<section class="section" x-show="tab==='loops'">
+  <h2>자동 피드백 루프 다이어그램</h2>
+  <p class="s-sub">파이프라인이 스스로 재시도하는 4종 루프. 인간이 개입하지 않고도 품질 기준에 도달할 때까지 자동 보정한다.</p>
+
+  <div class="loop-diagram">
+    <div class="loop-cards">
+
+      <div class="loop-card">
+        <div class="loop-flow">VA → A2</div>
+        <div class="loop-trigger">통과 논문 부족 시 자동 재수집</div>
+        <div class="loop-desc">
+          Validator A가 3단계 스크리닝 통과 논문이 <code>final_count &lt; 5</code>로 판정하면,
+          A2가 검색 쿼리를 확장(키워드 변형·연구 기간 확장)하여 자동 재수집한다.
+          국내(Exa) + 국제(Deep Research 핸드오프) 양쪽 모두 재시도.
+        </div>
+        <div class="loop-limit">최대 반복: 2회</div>
+      </div>
+
+      <div class="loop-card warning">
+        <div class="loop-flow">A3 → Gate 1</div>
+        <div class="loop-trigger">중복 위험 시 대안 가설 자동 제시</div>
+        <div class="loop-desc">
+          A3가 선행연구와 유사도 0.8 이상인 논문 2편 이상 발견 → <code>duplication_risk: high</code>.
+          gap 분석에서 도출한 미연구 영역을 활용해 대안 가설 최대 3개를 자동 생성하여
+          Gate 1로 복귀, 사용자가 선택하도록 한다.
+        </div>
+        <div class="loop-limit">최대 반복: 사용자 결정에 따름</div>
+      </div>
+
+      <div class="loop-card">
+        <div class="loop-flow">VB → A3</div>
+        <div class="loop-trigger">근거 신뢰도 저하 시 자동 재분석</div>
+        <div class="loop-desc">
+          Validator B가 클레임-초록 교차검증에서 <code>overall_reliability: low</code>로 판정하면,
+          의심 클레임 목록(<code>reanalysis_targets</code>)을 A3에 전달하여 재분석.
+          A3는 해당 클레임의 논문 초록을 다시 확인하고 수정된 gap·유사도 분석을 출력한다.
+        </div>
+        <div class="loop-limit">최대 반복: 1회</div>
+      </div>
+
+      <div class="loop-card warning">
+        <div class="loop-flow">Gate 2 → A4</div>
+        <div class="loop-trigger">초안 수정 요청 시 부분/전면 재생성</div>
+        <div class="loop-desc">
+          사용자가 [B] 섹션 수정 → "B 1 배경에 통계 추가해 주세요"처럼 입력하면 해당 섹션만 재생성.
+          [C] 전면 재작성 → 전체 피드백 입력 → A4 전체 재실행. 다른 섹션의 인용·구조는 보존된다.
+        </div>
+        <div class="loop-limit">최대 반복: 무제한</div>
+      </div>
+
+    </div>
+  </div>
+
+  <h2 style="margin-top:48px">루프 작동 원리</h2>
+  <p class="s-sub">각 루프는 검증 에이전트가 명시적 boolean 또는 enum 신호를 반환해야 발동한다.</p>
+
+  <div class="loop-diagram">
+    <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:2;color:var(--text);">
+<span style="color:var(--feedback);font-weight:700">// 1. VA → A2 — 통과 논문 부족</span><br>
+if (validator_a.<span style="color:var(--opus)">final_count</span> &lt; 5) {<br>
+&nbsp;&nbsp;agent2.rerun({ <span style="color:var(--warning)">query_expansion: true</span>, <span style="color:var(--warning)">retry_count: n+1</span> });<br>
+}<br><br>
+
+<span style="color:var(--warning);font-weight:700">// 2. A3 → Gate 1 — 중복 위험</span><br>
+if (agent3.<span style="color:var(--opus)">duplication_risk</span> === <span style="color:var(--feedback)">"high"</span>) {<br>
+&nbsp;&nbsp;gate1.show({ <span style="color:var(--warning)">alternatives: agent3.alternatives</span> });&nbsp;&nbsp;<span style="color:var(--text-tertiary)">// 3개 대안</span><br>
+}<br><br>
+
+<span style="color:var(--feedback);font-weight:700">// 3. VB → A3 — 근거 신뢰도 저하</span><br>
+if (validator_b.<span style="color:var(--opus)">overall_reliability</span> === <span style="color:var(--feedback)">"low"</span>) {<br>
+&nbsp;&nbsp;agent3.reanalyze({ <span style="color:var(--warning)">flagged_claims: validator_b.hallucination_flags</span> });<br>
+}<br><br>
+
+<span style="color:var(--warning);font-weight:700">// 4. Gate 2 → A4 — 초안 수정</span><br>
+if (gate2.action === <span style="color:var(--feedback)">"revise_section"</span>) {<br>
+&nbsp;&nbsp;agent4.regenerate({ <span style="color:var(--warning)">revise_only: gate2.sections</span> });<br>
+} else if (gate2.action === <span style="color:var(--feedback)">"rewrite_all"</span>) {<br>
+&nbsp;&nbsp;agent4.regenerate({ <span style="color:var(--warning)">feedback: gate2.feedback</span> });<br>
+}
+    </div>
+  </div>
+</section>
 
 <script>
 function pipeline() {
   return {
+    tab: 'intro',
     selected: null,
     select(id) { this.selected = this.selected === id ? null : id; },
+    init() {
+      this.$watch('tab', (v) => {
+        if (v === 'pipeline') {
+          this.$nextTick(() => setTimeout(drawFeedbackLoops, 100));
+        }
+      });
+    },
     nodes: {
       input: {
         type: 'User Input',
@@ -534,174 +1033,278 @@ function pipeline() {
         subtitle: '파이프라인 시작점',
         details: [
           '한국어·영어 혼용 텍스트 허용',
-          '변수·대상·지표가 불명확해도 됨 — A1이 정제',
+          '변수·대상·지표가 불명확해도 됨 — A1이 정제하면서 재질문',
           '예: "스마트 팩토리 도입이 중소기업 생산성에 미치는 영향 연구하고 싶어요"'
         ]
       },
       a1: {
-        type: 'Agent 1 · Sonnet 4.6',
-        title: '가설 정제',
-        subtitle: '모호한 아이디어 → 검증 가능한 학술 가설',
+        type: 'Agent 1',
+        title: 'A1 — 가설 정제',
+        subtitle: '모호한 아이디어를 검증 가능한 학술 가설로 구조화',
         model: 'claude-sonnet-4-6',
         input: 'free_text: string',
-        output: 'agent1_output.json\n{\n  hypothesis: { statement, IV, DV,\n    target_population, measurement },\n  keywords: string[],\n  scope: { include, exclude },\n  search_queries: [\n    { source:"KCI", query_type:"keyword" },\n    { source:"RISS", query_type:"keyword" },\n    { source:"Deep Research",\n      query_type:"deep_research_prompt" }\n  ]\n}',
+        output: 'agent1_output.json\n{\n  hypothesis: {\n    statement, IV, DV,\n    target_population, measurement\n  },\n  keywords: string[],\n  scope: { include, exclude },\n  search_queries: [\n    { source:"KCI", query_type:"keyword" },\n    { source:"RISS", query_type:"keyword" },\n    { source:"Deep Research",\n      query_type:"deep_research_prompt" }\n  ]\n}',
         details: [
           '갭 분석: 독립변수·종속변수·대상·관계유형·설계파라미터·범위 6개 요소 확인',
-          '불명확하면 재질문 먼저 (JSON 출력 전)',
-          'Deep Research용 자연어 프롬프트 자동 생성',
-          'KCI/RISS 키워드 쿼리 생성'
+          '불명확하면 JSON 출력 전 재질문 (설계 파라미터 근거 미제시 포함)',
+          'Deep Research용 자연어 프롬프트 자동 생성 (가설 + 변수 + 대상 + 요청사항)',
+          'KCI/RISS 한국어 키워드 쿼리 생성'
         ],
-        feedback: ['중복 위험 high 시 Gate 1에서 대안 가설 3개 선택']
+        feedback: ['Gate 1에서 중복 위험 시 대안 가설 3개 중 선택 가능']
       },
       gate1: {
         type: 'Human Gate ①',
         title: 'Gate 1 — 가설 검토',
-        subtitle: '연구자가 가설을 최종 확인',
+        subtitle: '연구자가 정제된 가설을 최종 확인',
         input: 'agent1_output.json',
         details: [
           '[A] 승인 → A2 진행',
-          '[B] 수정 → 직접 입력 후 진행',
-          '[C] 반려 → 아이디어 재입력',
-          '[1-5] 중복 위험 high 시 대안 가설 선택 또는 위험 감수'
+          '[B] 수정 → 사용자가 직접 가설 수정 후 진행',
+          '[C] 반려 → 아이디어 재입력하여 A1 재실행',
+          '중복 위험 모드: [1-3] 대안 가설 A/B/C 선택, [4] 직접 수정, [5] 위험 감수 후 진행'
         ]
       },
       a2: {
-        type: 'Agent 2 · Sonnet 4.6',
-        title: 'Agent 2 — 국내 수집',
-        subtitle: 'KCI · RISS via Exa web search',
+        type: 'Agent 2',
+        title: 'A2 — 국내 수집',
+        subtitle: 'KCI · RISS via Exa web search + DR 핸드오프 출력',
         model: 'claude-sonnet-4-6',
-        input: 'agent1_output.json\n→ search_queries[KCI], search_queries[RISS]',
-        output: 'domestic_papers[]\n+ Deep Research 프롬프트 출력',
+        input: 'agent1_output.json\n→ search_queries[KCI]\n→ search_queries[RISS]\n→ search_queries[Deep Research]',
+        output: 'domestic_papers[]\n+ Deep Research 프롬프트 출력 후\n  사용자 입력 대기 상태로 전환',
         details: [
-          'web_search_exa(site:kci.go.kr) — 국내 학술지',
-          'web_search_exa(site:riss.kr) — 학위논문·학술지',
-          'Deep Research 프롬프트 블록 출력 후 사용자 입력 대기'
+          'web_search_exa(site:kci.go.kr, category:"research paper") — 국내 학술지',
+          'web_search_exa(site:riss.kr) — 학위논문·학술지 통합',
+          'Deep Research 프롬프트 블록을 화면에 출력하고 사용자 응답 대기',
+          '국내 결과는 source:"KCI"/"RISS", language:"ko", metadata_partial:false 표시'
         ],
-        feedback: ['VA final_count < 5 → 쿼리 확장 후 재수집 (최대 2회)']
+        feedback: ['VA의 final_count < 5 → 쿼리 확장 후 재수집 (최대 2회)']
       },
       dr: {
         type: 'Human Handoff',
         title: 'Deep Research 핸드오프',
-        subtitle: 'Gemini가 방대한 국제 논문 탐색',
+        subtitle: 'Gemini로 방대한 국제 논문 탐색을 위임',
         details: [
-          'A2가 생성한 프롬프트를 gemini.google.com Deep Research에 붙여넣기',
-          'Gemini가 multi-step autonomous research 수행 (15-20편 목표)',
-          '생성된 리포트 전문을 대화에 붙여넣기',
-          '국내(Exa)가 못 닿는 Google 학술 소스까지 커버'
+          'A2가 생성한 자연어 프롬프트를 gemini.google.com의 Deep Research에 붙여넣기',
+          'Gemini가 multi-step autonomous research로 15-20편 목표 탐색',
+          '교차 인용 추적, Google 웹+학술 소스 광범위 탐색',
+          '생성된 리포트(마크다운 전문)를 이 대화창에 붙여넣어 다음 단계로 전달'
         ]
       },
       parser: {
-        type: 'Agent 2 보조 · Sonnet 4.6',
+        type: 'Agent 2 보조',
         title: 'A2-DR Parser',
-        subtitle: 'DR 리포트 → 구조화된 논문 메타데이터',
+        subtitle: 'DR 리포트 → 구조화된 논문 메타데이터 + 병합·스크리닝',
         model: 'claude-sonnet-4-6',
-        input: 'DR report (markdown text)',
-        output: 'papers[] with\n  extraction_confidence: high|medium|low\n  metadata_partial: boolean',
+        input: 'DR report (markdown text)\n+ domestic_papers[] (from A2)',
+        output: 'agent2_output.json\n{\n  papers: [{\n    ...metadata,\n    extraction_confidence:\n      "high" | "medium" | "low",\n    metadata_partial: boolean\n  }],\n  total_count,\n  search_log\n}',
         details: [
-          '리포트 패턴 감지 (인라인번호/저자연도/각주/링크)',
-          'References 섹션에서 title·authors·year·DOI·URL 추출',
+          '리포트 패턴 감지 (인라인번호/저자연도/각주/하이퍼링크 4종)',
+          'References 섹션에서 title·authors·year·journal·DOI·URL 추출',
           '본문에서 각 논문의 핵심 발견 추출 → abstract 필드',
-          '국내(Exa) + 국제(DR) 병합, DOI·제목 기준 중복 제거',
-          '3단계 스크리닝 (제목→초록→핵심발견)'
+          '추출 확신도 판정: DOI 직접 확인=high, 제목+저자+연도=medium, 추론=low',
+          '국내(Exa) + 국제(DR) 병합, DOI·제목+저자+연도 기준 중복 제거',
+          '3단계 스크리닝: 제목 → 초록 → 핵심 발견'
         ]
       },
       va: {
-        type: 'Validator A · Opus 4.7',
+        type: 'Validator A',
         title: 'Validator A — 출처 검증',
-        subtitle: '수집 논문의 신뢰성 필터링',
+        subtitle: '수집 논문의 신뢰성 필터링 (Opus 판단)',
         model: 'claude-opus-4-7',
         input: 'agent2_output.json',
-        output: 'validator_a_output.json\n{ validated_papers[], final_count,\n  rerun_needed: boolean }',
+        output: 'validator_a_output.json\n{\n  validated_papers[],\n  final_count: integer,\n  rerun_needed: boolean,\n  removed: [{\n    paper_id, reason\n  }]\n}',
         details: [
-          'URL 생존 확인 (web_fetch_exa → 404/빈응답 제거)',
-          '게재지 등급 분류 (peer-reviewed / preprint / blog)',
-          '메타데이터 일관성 확인 (제목·저자·연도)',
-          'extraction_confidence: low 논문 우선 재검증',
-          'final_count < 5 → rerun_needed: true → A2 재수집'
+          'URL 생존 확인: web_fetch_exa로 404/빈응답/리다이렉트 제거',
+          '게재지 등급 분류: peer-reviewed / preprint / blog / unknown',
+          '메타데이터 일관성: 제목·저자·연도 교차 확인',
+          'extraction_confidence: low 논문은 우선 재검증',
+          '중복 제거: DOI > arXiv ID > 제목 정규화+저자+연도',
+          'final_count < 5 → rerun_needed: true 반환'
         ],
-        feedback: ['final_count < 5 → A2로 재수집 신호 (최대 2회)']
+        feedback: ['final_count < 5 → A2로 재수집 신호 (최대 2회 반복)']
       },
       a3: {
-        type: 'Agent 3 · Opus 4.7',
-        title: 'Agent 3 — 논문 분석',
-        subtitle: '선행연구 흐름·Gap·유사도·실행가능성 도출',
+        type: 'Agent 3',
+        title: 'A3 — 논문 분석·Gap 도출',
+        subtitle: '4계층 분석 + 중복 위험 + 실행 가능성 (Opus 추론)',
         model: 'claude-opus-4-7',
-        input: 'agent1_output.json\nvalidator_a_output.json',
-        output: 'agent3_output.json\n{ research_flow, methodology_dist,\n  similarity_eval, gap,\n  duplication_risk, feasibility }',
+        input: 'agent1_output.json\nvalidator_a_output.json\n(재분석 시) reanalysis_targets',
+        output: 'agent3_output.json\n{\n  research_flow: {\n    summary, dominant_theories,\n    trend, mba_theory_link\n  },\n  methodology_dist,\n  similarity_eval: [{id, score}],\n  gap: { statement, differentiator },\n  duplication_risk: "low"|"med"|"high",\n  alternatives: [3개] (high 시),\n  feasibility: {\n    data, sample, complexity,\n    timeline, overall\n  }\n}',
         details: [
-          '계층1: 연구 흐름 — 지배 이론(MBA 이론 필수), 트렌드',
-          '계층2: 방법론 분포 — 양적/질적/혼합 분류',
-          '계층3: 유사도 평가 — 논문별 similarity_score(0-1)',
-          '계층4: 실행 가능성 — 데이터수집·표본·복잡도·일정 (green/yellow/red)',
-          'duplication_risk: high → 대안 가설 3개 생성'
+          '계층1 — 연구 흐름: 지배 이론, 트렌드 (MBA 이론 필수 연결)',
+          '계층2 — 방법론 분포: 양적/질적/혼합 분류, 지배 방법론',
+          '계층3 — 유사도 평가: 논문별 similarity_score (0.0-1.0)',
+          '계층4 — 실행 가능성: 데이터·표본·복잡도·일정 4축 (green/yellow/red)',
+          '중복 위험 high (0.8+ 2편 이상) → 대안 가설 3개 자동 생성',
+          'Gap 도출은 실제 논문 id를 인용 근거로 제시'
         ],
         feedback: [
-          'duplication_risk: high → Gate 1 복귀 (대안 가설 선택)',
-          'VB overall_reliability: low → reanalysis_targets 전달받아 재분석'
+          'duplication_risk: high → Gate 1 복귀 (대안 3개 제시)',
+          'VB의 overall_reliability: low → reanalysis_targets 받아 재분석 (1회)'
         ]
       },
       vb: {
-        type: 'Validator B · Opus 4.7',
+        type: 'Validator B',
         title: 'Validator B — 근거 검증',
-        subtitle: '할루시네이션 탐지 · BibTeX 품질 검사',
+        subtitle: '할루시네이션 탐지 + BibTeX 품질 검사 (Opus 비판적 추론)',
         model: 'claude-opus-4-7',
         input: 'agent3_output.json\nvalidator_a_output.json',
-        output: 'validator_b_output.json\n{ claim_checks[], hallucination_flags[],\n  blocked_claims[], bibtex_issues[],\n  overall_reliability, rubric_scores }',
+        output: 'validator_b_output.json\n{\n  claim_checks: [{\n    claim, source_paper_id,\n    supported: boolean,\n    confidence: "high"|"med"|"low"\n  }],\n  hallucination_flags: [...],\n  blocked_claims: [...],\n  bibtex_issues: [{\n    paper_id, field, issue\n  }],\n  rubric_scores: { dim2, dim4, dim9 },\n  overall_reliability,\n  reanalysis_needed,\n  reanalysis_targets\n}',
         details: [
-          'A3 인용 클레임 전체 추출 → 초록·본문 대조',
-          'hallucination 판정: paper_not_found / claim_absent / contradicts',
-          'blocked_claims: A4 사용 절대 금지 목록',
-          'BibTeX 메타데이터 검증 (et al. 금지, Unknown 금지, 하이픈 포맷)',
-          'Dim2/Dim4/Dim9 루브릭 1-5점 채점'
+          'A3 인용 클레임 전체 추출 → validator_a의 초록·본문 대조',
+          '할루시네이션 4종 판정: paper_not_found / claim_absent / contradicts / metadata_mismatch',
+          'blocked_claims: A4가 절대 사용 금지하는 클레임 id 목록',
+          'BibTeX 검증: et al./Unknown 금지, year 4자리, pages는 en-dash(--)',
+          'scholar-evaluation 루브릭 Dim2/Dim4/Dim9 1-5점 채점',
+          '평균 < 3.0 또는 hallucination 3개 이상 → overall_reliability: low'
         ],
-        feedback: ['overall_reliability: low → A3 재분석 신호 (1회)']
+        feedback: ['overall_reliability: low → A3 재분석 신호 (1회 반복)']
       },
       a4: {
-        type: 'Agent 4 · Sonnet 4.6',
-        title: 'Agent 4 — 계획서 작성',
-        subtitle: 'aSSIST 6섹션 초안 생성',
+        type: 'Agent 4',
+        title: 'A4 — 계획서 작성',
+        subtitle: 'aSSIST 6섹션 초안 + references.bib 생성',
         model: 'claude-sonnet-4-6',
-        input: 'agent1+3_output.json\nvalidator_a+b_output.json',
-        output: 'proposal_draft.md\nreferences.bib',
+        input: 'agent1_output.json\nagent3_output.json\nvalidator_a_output.json\nvalidator_b_output.json\n(수정 시) revise_only / feedback',
+        output: 'proposal_draft.md\n+ pandoc YAML front matter\n+ 6개 섹션 본문\nreferences.bib (BibTeX)',
         details: [
-          '§1 연구배경: gap 진술로 마무리, 수치 전부 인용',
-          '§2 연구목적: 행동동사 + 구체적 산출물 형태',
+          'blocked_claims에 포함된 클레임 절대 미사용 (하드 블록)',
+          '§1 연구배경: 수치 인용 필수, gap 진술로 마무리',
+          '§2 연구목적: 행동동사 + 구체적 산출물 형태 (회귀계수 도출 등)',
           '§3 연구가설: H1 + 조작적 정의',
-          '§4 이론적배경: MBA 핵심 이론 필수 연결',
-          '§5 연구방법론: 통계적 검정력 분석 필수 (양적)',
-          '§6 기대효과: 프리프린트 한계 명시',
-          'blocked_claims 절대 사용 금지',
-          'BibTeX 형식 규칙 적용 (en-dash, author 형식 등)'
+          '§4 이론적배경: MBA 핵심 이론(RBV·TAM·TQM 등) 필수 연결',
+          '§5 연구방법론: 양적 연구 시 통계적 검정력 분석 필수 (Cohen 기준)',
+          '§6 기대효과: 프리프린트 출처 사용 시 한계 명시',
+          'BibTeX 형식 규칙: en-dash(--), and 구분, {Unknown} 금지',
+          '한국어 학술 문체 12규칙 + K1-K5 적용'
         ],
         feedback: ['Gate 2 섹션 수정 → 해당 섹션만 재생성 (무제한)']
       },
       gate2: {
         type: 'Human Gate ②',
         title: 'Gate 2 — 초안 검토',
-        subtitle: '6섹션 초안 최종 승인',
-        input: 'proposal_draft.md',
+        subtitle: '6섹션 초안 최종 승인 또는 수정 지시',
+        input: 'proposal_draft.md\nreferences.bib',
         details: [
-          '[A] 승인 → convert.sh 실행',
-          '[B] 섹션 수정 → "B 1 배경에 통계 추가" → 해당 섹션만 재생성',
-          '[C] 전면 재작성 → 전체 피드백 입력 → A4 전체 재실행'
+          '[A] 승인 → convert.sh 실행 (PDF + HTML + ZIP)',
+          '[B] 섹션 수정 → 예: "B 1 배경에 통계 추가해 주세요" → 해당 섹션만 A4 재생성',
+          '[C] 전면 재작성 → 전체 피드백 입력 → A4 전체 재실행',
+          '섹션 수정 시 다른 섹션의 인용·구조는 보존됨'
         ]
       },
       convert: {
         type: 'Script',
         title: 'convert.sh — 문서 변환',
-        subtitle: 'pandoc + xelatex 또는 Overleaf ZIP',
+        subtitle: 'pandoc + xelatex 또는 Overleaf ZIP 자동 분기',
         input: 'proposal_draft.md\nreferences.bib',
-        output: 'proposal_draft.pdf  (xelatex 있을 때)\nproposal_draft_overleaf.zip  (폴백)\nproposal_draft.html  (항상)',
+        output: 'proposal_draft.pdf   (xelatex 있을 때)\n  또는\nproposal_draft_overleaf.zip  (폴백)\nproposal_draft.html  (항상)\nproposal_draft.tex   (항상)',
         details: [
-          'xelatex 감지 → PDF 직접 컴파일',
-          'xelatex 없으면 Overleaf ZIP 생성 (% !TEX program = xelatex 포함)',
+          'pandoc으로 md → tex 변환, citeproc로 인용 처리',
+          'tex 첫 줄에 % !TEX program = xelatex 매직 커멘트 자동 삽입',
+          'xelatex 감지 → 직접 PDF 컴파일',
+          'xelatex 없으면 Overleaf ZIP 패키징 (tex + bib)',
           'setup-latex.sh로 BasicTeX + kotex + nanum 설치 가능 (~100MB)',
-          'HTML 미리보기는 항상 생성'
+          'HTML 미리보기는 항상 생성 (embed-resources, Korean font CSS)'
         ]
       }
     }
-  }
+  };
 }
+
+// ─── Feedback Loop SVG Renderer ───
+function drawFeedbackLoops() {
+  const svg = document.getElementById('feedback-svg');
+  const pipeline = document.getElementById('pipeline');
+  if (!svg || !pipeline) return;
+
+  // Clear existing
+  svg.innerHTML = '';
+  document.querySelectorAll('.feedback-label').forEach(el => el.remove());
+
+  const loops = [
+    { from: 'va',    to: 'a2',    label: 'final_count < 5',           color: '#F43F5E', offsetX: 80 },
+    { from: 'a3',    to: 'gate1', label: 'duplication_risk: high',     color: '#F59E0B', offsetX: 140 },
+    { from: 'vb',    to: 'a3',    label: 'reliability: low',           color: '#F43F5E', offsetX: 80 },
+    { from: 'gate2', to: 'a4',    label: 'revise / rewrite',           color: '#F59E0B', offsetX: 80 },
+  ];
+
+  const pipelineRect = pipeline.getBoundingClientRect();
+  const w = pipelineRect.width;
+  const h = pipeline.scrollHeight;
+
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+  // Define arrow markers
+  let defs = '<defs>';
+  loops.forEach((loop, i) => {
+    defs += `
+      <marker id="arrow-${i}" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="${loop.color}"/>
+      </marker>`;
+  });
+  defs += '</defs>';
+  svg.innerHTML = defs;
+
+  loops.forEach((loop, i) => {
+    const fromNode = document.querySelector(`[data-node="${loop.from}"]`);
+    const toNode = document.querySelector(`[data-node="${loop.to}"]`);
+    if (!fromNode || !toNode) return;
+
+    const fromRect = fromNode.getBoundingClientRect();
+    const toRect = toNode.getBoundingClientRect();
+
+    // Compute relative positions
+    const x1 = fromRect.right - pipelineRect.left;
+    const y1 = fromRect.top + fromRect.height / 2 - pipelineRect.top;
+    const x2 = toRect.right - pipelineRect.left;
+    const y2 = toRect.top + toRect.height / 2 - pipelineRect.top;
+
+    const peakX = Math.max(x1, x2) + loop.offsetX;
+
+    // Cubic bezier: curve out to right, loop back
+    const path = `
+      M ${x1} ${y1}
+      C ${peakX} ${y1}, ${peakX} ${y2}, ${x2 + 8} ${y2}
+    `;
+
+    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.setAttribute('d', path);
+    pathEl.setAttribute('stroke', loop.color);
+    pathEl.setAttribute('stroke-width', '2');
+    pathEl.setAttribute('fill', 'none');
+    pathEl.setAttribute('stroke-dasharray', '6 4');
+    pathEl.setAttribute('marker-end', `url(#arrow-${i})`);
+    pathEl.setAttribute('class', 'feedback-path');
+    pathEl.setAttribute('opacity', '0.85');
+    svg.appendChild(pathEl);
+
+    // Add label
+    const label = document.createElement('div');
+    label.className = 'feedback-label';
+    if (loop.color === '#F59E0B') label.classList.add('warning');
+    label.textContent = loop.label;
+    label.style.left = `${peakX + 6}px`;
+    label.style.top = `${(y1 + y2) / 2 - 10}px`;
+    pipeline.appendChild(label);
+  });
+}
+
+// Redraw on resize
+window.addEventListener('resize', () => {
+  if (document.querySelector('.tab.active')?.textContent.includes('파이프라인')) {
+    setTimeout(drawFeedbackLoops, 100);
+  }
+});
+
+// Initial draw if pipeline tab is open (default is intro, so handled by $watch)
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    // For default tab, no need to draw. The Alpine $watch handles tab changes.
+  }, 200);
+});
 </script>
 </body>
 </html>
