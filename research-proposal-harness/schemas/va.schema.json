@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ValidatorAOutput",
+  "description": "Validator A (출처 신빙성 검증) 출력 스키마",
+  "type": "object",
+  "required": ["validated_papers", "removed_count", "flagged_count", "final_count"],
+  "properties": {
+    "validated_papers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "credibility", "url_alive"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "url_alive": { "type": "boolean", "description": "URL 접근 가능 여부" },
+          "credibility": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "high=동료심사 학술지, medium=컨퍼런스/preprint, low=블로그/출처불명"
+          },
+          "credibility_reason": { "type": "string" },
+          "is_duplicate": { "type": "boolean" },
+          "duplicate_of": { "type": "string", "description": "중복 논문 id (있는 경우)" },
+          "metadata_consistent": {
+            "type": "boolean",
+            "description": "제목·저자·연도·게재지 일관성"
+          }
+        }
+      }
+    },
+    "removed_papers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "removal_reason": { "type": "string" }
+        }
+      },
+      "description": "제거된 논문 목록과 사유"
+    },
+    "removed_count": { "type": "integer" },
+    "flagged_count": {
+      "type": "integer",
+      "description": "medium 이하 신뢰도로 플래그된 논문 수"
+    },
+    "final_count": {
+      "type": "integer",
+      "description": "검증 통과 논문 수 (≥5 필요, 미달 시 A2 재수집)"
+    },
+    "rerun_needed": {
+      "type": "boolean",
+      "description": "final_count < 5 이면 true — A2 재수집 신호"
+    },
+    "rerun_hint": {
+      "type": "string",
+      "description": "재수집 시 쿼리 확장 방향 (rerun_needed=true일 때)"
+    }
+  }
+}

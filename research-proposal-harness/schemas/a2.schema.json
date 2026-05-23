@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent2Output",
+  "description": "Agent 2 (선행연구 수집) 출력 스키마",
+  "type": "object",
+  "required": ["papers", "total_count", "search_log"],
+  "properties": {
+    "papers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "authors", "year", "source", "abstract", "url"],
+        "properties": {
+          "id": { "type": "string", "description": "내부 식별자 (예: p001)" },
+          "title": { "type": "string" },
+          "authors": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "year": { "type": "integer", "minimum": 1900, "maximum": 2030 },
+          "source": {
+            "type": "string",
+            "description": "KCI | RISS | Deep Research | arXiv | Semantic Scholar"
+          },
+          "journal": { "type": "string", "description": "게재지명 (선택)" },
+          "doi": { "type": "string", "description": "DOI (있는 경우)" },
+          "abstract": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "publication_type": {
+            "type": "string",
+            "enum": ["peer-reviewed", "preprint", "thesis", "conference", "report", "unknown"]
+          },
+          "language": { "type": "string", "enum": ["ko", "en", "other"] },
+          "metadata_partial": {
+            "type": "boolean",
+            "description": "Deep Research 리포트에서 추출된 메타데이터로 일부 필드가 불완전할 수 있음. true이면 VA가 우선 재검증."
+          },
+          "extraction_confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "high: DOI/URL 직접 확인, medium: 제목+저자+연도 일치, low: 추론 또는 부분 일치"
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "total_count": {
+      "type": "integer",
+      "description": "수집된 논문 총 수 (중복 제거 전)"
+    },
+    "search_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "query", "results_count"],
+        "properties": {
+          "source": { "type": "string" },
+          "query": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "results_count": { "type": "integer" }
+        }
+      },
+      "description": "소스별 검색 로그 (재현성)"
+    }
+  }
+}

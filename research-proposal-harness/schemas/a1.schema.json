@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent1Output",
+  "description": "Agent 1 (가설 정제) 출력 스키마",
+  "type": "object",
+  "required": ["hypothesis", "keywords", "scope", "search_queries"],
+  "properties": {
+    "hypothesis": {
+      "type": "object",
+      "required": ["statement", "independent_variable", "dependent_variable", "target_population", "measurement"],
+      "properties": {
+        "statement": {
+          "type": "string",
+          "description": "완성된 가설 문장 (H1: X는 Y에 정(+)의 영향을 미친다)"
+        },
+        "independent_variable": {
+          "type": "string",
+          "description": "독립변수명 및 조작적 정의"
+        },
+        "dependent_variable": {
+          "type": "string",
+          "description": "종속변수명 및 조작적 정의"
+        },
+        "target_population": {
+          "type": "string",
+          "description": "연구 대상 (예: 국내 중소 제조기업 50인 이상)"
+        },
+        "measurement": {
+          "type": "string",
+          "description": "측정 방법 또는 지표 (예: 설문 5점 리커트, OEE 수치)"
+        }
+      }
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 3,
+      "maxItems": 10,
+      "description": "한국어 및 영어 검색 키워드 목록"
+    },
+    "scope": {
+      "type": "object",
+      "required": ["include", "exclude"],
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "연구 포함 범위"
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "연구 제외 범위"
+        }
+      }
+    },
+    "search_queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["query", "language", "source", "query_type"],
+        "properties": {
+          "query": { "type": "string" },
+          "language": { "type": "string", "enum": ["ko", "en"] },
+          "source": { "type": "string", "description": "KCI | RISS | Deep Research" },
+          "query_type": {
+            "type": "string",
+            "enum": ["keyword", "deep_research_prompt"],
+            "description": "keyword: Exa용 단순 검색어, deep_research_prompt: Gemini Deep Research용 자연어 프롬프트"
+          }
+        }
+      },
+      "minItems": 3,
+      "description": "소스별 검색 쿼리. KCI(keyword)·RISS(keyword) 각 1개 + Deep Research 프롬프트 1개"
+    },
+    "refinement_notes": {
+      "type": "string",
+      "description": "원본 아이디어와 정제된 가설의 차이 설명 (선택)"
+    }
+  }
+}

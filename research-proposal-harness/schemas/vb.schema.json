@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ValidatorBOutput",
+  "description": "Validator B (근거 정합성 검증) 출력 스키마",
+  "type": "object",
+  "required": ["claim_checks", "hallucination_flags", "overall_reliability"],
+  "properties": {
+    "claim_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim", "source_paper_id", "supported", "confidence"],
+        "properties": {
+          "claim": {
+            "type": "string",
+            "description": "A3 분석에서 등장한 주장 문장"
+          },
+          "source_paper_id": {
+            "type": "string",
+            "description": "이 주장의 근거로 인용된 논문 id"
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "해당 논문의 초록/본문이 이 주장을 실제로 뒷받침하는가"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "검증 신뢰도 (high=본문 직접 확인, medium=초록 기반, low=추론)"
+          },
+          "note": { "type": "string", "description": "불일치 내용 또는 주의사항" }
+        }
+      }
+    },
+    "hallucination_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim", "issue"],
+        "properties": {
+          "claim": { "type": "string" },
+          "issue": {
+            "type": "string",
+            "enum": [
+              "paper_not_found",
+              "paper_exists_but_claim_absent",
+              "claim_contradicts_paper",
+              "metadata_mismatch"
+            ]
+          },
+          "detail": { "type": "string" }
+        }
+      },
+      "description": "할루시네이션 의심 항목 목록"
+    },
+    "dim2_literature_context": {
+      "type": "object",
+      "required": ["score", "note"],
+      "properties": {
+        "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "note": { "type": "string", "description": "gap 식별 정확성, 합성 여부 평가" }
+      },
+      "description": "scholar-evaluation Dim2 적용 결과"
+    },
+    "dim4_data_evidence": {
+      "type": "object",
+      "required": ["score", "note"],
+      "properties": {
+        "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "note": { "type": "string", "description": "출처 신뢰성, 샘플 크기 충분성 평가" }
+      },
+      "description": "scholar-evaluation Dim4 적용 결과"
+    },
+    "dim9_citations": {
+      "type": "object",
+      "required": ["score", "note"],
+      "properties": {
+        "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "note": { "type": "string", "description": "인용-주장 일치율 평가" }
+      },
+      "description": "scholar-evaluation Dim9 적용 결과"
+    },
+    "overall_reliability": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "high=A4 진행 가능, medium=주의 사항 있으나 진행 가능, low=A3 재분석 필요"
+    },
+    "reanalysis_needed": {
+      "type": "boolean",
+      "description": "overall_reliability=low이면 true — A3 재분석 신호"
+    },
+    "reanalysis_targets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "재분석이 필요한 클레임 목록 (reanalysis_needed=true일 때)"
+    }
+  }
+}

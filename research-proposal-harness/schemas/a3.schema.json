@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent3Output",
+  "description": "Agent 3 (논문 분석·가설 대조) 출력 스키마",
+  "type": "object",
+  "required": ["research_flow", "methodology_dist", "similarity_eval", "gap", "duplication_risk"],
+  "properties": {
+    "research_flow": {
+      "type": "object",
+      "required": ["summary", "dominant_theories", "evolution"],
+      "properties": {
+        "summary": { "type": "string", "description": "선행연구 흐름 요약 (3–5문장)" },
+        "dominant_theories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "이 분야에서 지배적인 이론·프레임워크"
+        },
+        "evolution": { "type": "string", "description": "연구 흐름 변화 (최근 트렌드)" }
+      }
+    },
+    "methodology_dist": {
+      "type": "object",
+      "properties": {
+        "quantitative": { "type": "integer", "description": "양적 연구 논문 수" },
+        "qualitative": { "type": "integer", "description": "질적 연구 논문 수" },
+        "mixed": { "type": "integer", "description": "혼합 연구 논문 수" },
+        "dominant_method": { "type": "string", "description": "가장 많이 사용된 방법론" }
+      }
+    },
+    "similarity_eval": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["paper_id", "similarity_score", "overlap_description"],
+        "properties": {
+          "paper_id": { "type": "string" },
+          "similarity_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "제안 가설과의 유사도 (0=무관, 1=동일)"
+          },
+          "overlap_description": { "type": "string" }
+        }
+      },
+      "description": "각 논문과 제안 가설의 유사도 평가"
+    },
+    "gap": {
+      "type": "object",
+      "required": ["statement", "justification"],
+      "properties": {
+        "statement": {
+          "type": "string",
+          "description": "연구 공백 1–2문장 (무엇이 아직 연구되지 않았는가)"
+        },
+        "justification": {
+          "type": "string",
+          "description": "gap 도출 근거 (어떤 논문들이 어디까지 다뤘고 무엇이 남았는가)"
+        },
+        "differentiator": {
+          "type": "string",
+          "description": "제안 연구의 차별점"
+        }
+      }
+    },
+    "duplication_risk": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "low=명확한 차별점 있음, medium=부분 중복 가능, high=핵심 가설이 기존 연구와 동일"
+    },
+    "duplication_detail": {
+      "type": "string",
+      "description": "duplication_risk high/medium일 때 상세 설명"
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["hypothesis_statement", "rationale"],
+        "properties": {
+          "hypothesis_statement": { "type": "string" },
+          "rationale": { "type": "string", "description": "왜 이 대안이 더 차별적인가" }
+        }
+      },
+      "maxItems": 3,
+      "description": "duplication_risk=high일 때 Gate 1에 제시할 대안 가설 (최대 3개)"
+    }
+  }
+}

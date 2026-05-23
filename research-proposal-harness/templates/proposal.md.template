@@ -1,0 +1,47 @@
+---
+title: "{{RESEARCH_TITLE}}"
+subtitle: "aSSIST MBA 논문 연구계획서"
+author: "{{AUTHOR_NAME}}"
+date: "{{DATE}}"
+lang: ko
+geometry: "a4paper, top=3cm, bottom=2.5cm, left=3cm, right=2.5cm"
+linestretch: 1.5
+fontsize: 12pt
+bibliography: references.bib
+csl: apa.csl
+mainfont: NanumMyeongjo
+monofont: D2Coding
+header-includes:
+  - \usepackage{kotex}
+  - \usepackage{setspace}
+  - \usepackage{indentfirst}
+---
+
+# 1. 연구 배경
+
+{{SECTION_1_BACKGROUND}}
+
+# 2. 연구 목적
+
+{{SECTION_2_OBJECTIVES}}
+
+# 3. 연구 가설
+
+{{SECTION_3_HYPOTHESES}}
+
+# 4. 이론적 배경
+
+{{SECTION_4_THEORETICAL_FRAMEWORK}}
+
+# 5. 연구 방법론
+
+{{SECTION_5_METHODOLOGY}}
+
+# 6. 기대 효과
+
+{{SECTION_6_CONTRIBUTIONS}}
+
+# 참고문헌
+
+::: {#refs}
+:::
