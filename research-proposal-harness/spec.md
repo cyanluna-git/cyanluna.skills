@@ -18,8 +18,8 @@
 | 파일 | 설명 |
 |------|------|
 | `proposal_draft.md` | aSSIST 6섹션 연구계획서 본문 |
-| `proposal.pdf` | xelatex 컴파일 최종본 |
-| `proposal.html` | 웹 뷰어용 HTML |
+| `proposal_draft_overleaf.zip` | Overleaf 업로드용 패키지 (tex + bib) |
+| `proposal_draft.html` | 로컬 즉시 확인용 웹 미리보기 |
 | `references.bib` | 검증된 인용 문헌 BibTeX |
 
 ---

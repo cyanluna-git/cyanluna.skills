@@ -27,6 +27,10 @@
 1. `proposal_draft.md` — pandoc YAML front matter + 6섹션 본문
 2. `references.bib` — BibTeX 인용 목록
 
+작성 완료 후 `templates/convert.sh proposal_draft.md` 를 실행하면:
+- `proposal_draft_overleaf.zip` — Overleaf에 업로드하면 XeLaTeX으로 PDF 생성
+- `proposal_draft.html` — 로컬 즉시 확인용
+
 ## aSSIST 6섹션 구성
 
 ### 섹션 1 — 연구 배경 (Background)

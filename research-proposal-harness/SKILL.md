@@ -83,11 +83,12 @@ aSSIST MBA 논문 연구계획서(Research Proposal)를 자유형식 아이디�
          │ approved
          ▼
   ┌─────────────┐
-  │  convert.sh │  md → tex → pdf + html (pandoc + xelatex)
+  │  convert.sh │  md → tex → ZIP (Overleaf용) + HTML 미리보기
   └─────────────┘
          │
          ▼
-  [proposal.pdf  proposal.html  references.bib]
+  [proposal_overleaf.zip → Overleaf 업로드 → PDF]
+  [proposal.html  — 로컬 미리보기]
 ```
 
 ### 피드백 루프
@@ -140,9 +141,9 @@ aSSIST MBA 논문 연구계획서(Research Proposal)를 자유형식 아이디�
 | 파일 | 형식 | 설명 |
 |------|------|------|
 | `proposal_draft.md` | Markdown | pandoc YAML front matter + 6섹션 본문 |
-| `proposal.tex` | LaTeX | pandoc 변환 결과 |
-| `proposal.pdf` | PDF | xelatex 컴파일 결과 (NanumMyeongjo) |
-| `proposal.html` | HTML | pandoc HTML5 출력 |
+| `proposal_draft.tex` | LaTeX | pandoc 변환 결과 (`% !TEX program = xelatex` 포함) |
+| `proposal_draft_overleaf.zip` | ZIP | tex + bib 패키징 — Overleaf에 바로 업로드 |
+| `proposal_draft.html` | HTML | 로컬 즉시 확인용 미리보기 |
 | `references.bib` | BibTeX | 인용 문헌 전체 |
 
 ---
@@ -234,12 +235,13 @@ def run_research_proposal_harness(user_idea: str, output_dir: str):
                                input={..., "feedback": gate2_result.feedback},
                                model=SONNET)
 
-    # 변환
+    # 변환: tex + zip (Overleaf) + html
     run_shell("templates/convert.sh", input_md="proposal_draft.md", output_dir=output_dir)
 
     return {
-        "pdf": f"{output_dir}/proposal.pdf",
-        "html": f"{output_dir}/proposal.html",
+        "overleaf_zip": f"{output_dir}/proposal_draft_overleaf.zip",  # Overleaf 업로드용
+        "html": f"{output_dir}/proposal_draft.html",                  # 로컬 미리보기
+        "tex": f"{output_dir}/proposal_draft.tex",
         "bib": f"{output_dir}/references.bib"
     }
 ```
