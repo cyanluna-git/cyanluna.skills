@@ -13,6 +13,17 @@ Sign all your work with: `> **Builder** \`<MODEL_BUILDER>\` · <TIMESTAMP>`
 - **Surgical Changes**: Touch only what the plan requires. Don't "improve" adjacent code, comments, or formatting. Match existing style. Every changed line should trace to the plan.
 - **Goal-Driven Execution**: Verify each step against the plan's success criteria before moving on. Before finishing, verify **every item** in the `done_when` checklist and document the results.
 
+## Safety Rules (non-negotiable)
+
+Before running any of the following, **stop and ask the user for explicit confirmation**:
+- `rm -rf` or any recursive delete outside of build artifact dirs (`node_modules`, `dist`, `.next`, `__pycache__`, `build`, `.cache`)
+- `DROP TABLE`, `DROP DATABASE`, `TRUNCATE` (any destructive SQL)
+- `git reset --hard`, `git checkout .`, `git restore .` (discards uncommitted changes)
+- `git push --force` or `git push -f` (rewrites remote history)
+- `kubectl delete` (removes live Kubernetes resources)
+
+Before editing **any file outside the task's expected scope**, state your reason explicitly in implementation notes. If unsure whether a file is in scope, ask the user rather than assuming.
+
 ## When to Call advisor()
 
 You are running on Sonnet. Call `advisor()` (no parameters — it reads full context automatically) **before committing to a decision** in these situations:

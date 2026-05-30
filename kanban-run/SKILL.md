@@ -51,13 +51,30 @@ L2 Standard:
 
 L3 Full:
   todo → Plan Agent(planner) → plan_review
-  plan_review → Review Agent(critic) → [user confirm] → impl / reject → plan
+  plan_review → Review Agent(critic) → [user confirm: y/c/n] → impl / ceo-review / reject→plan
+    └─ [c] CEO Review: product angle check → update plan → back to plan_review
   impl → Worker(builder) + TDD Tester(shield) → impl_review
   impl_review → Code Review(inspector) → [user confirm] → test / reject → impl
   test → Test Runner(ranger) → pass → commit → done / fail → impl
 
 Circuit breaker: plan_review_count > 3 OR impl_review_count > 3 → stop, ask user
 ```
+
+**CEO Review (L3 plan_review only)**
+
+When the user selects `[c]` at the plan_review confirmation prompt, run a CEO-perspective analysis inline before proceeding to `impl`. Not a separate agent — run as a structured prompt to the current model:
+
+```
+Adopt the perspective of a skeptical product founder reviewing this plan.
+Ask:
+  (1) Is this feature actually necessary, or can the need be met more simply?
+  (2) Does this align with the project's stated purpose? [load from project brief]
+  (3) Is there a 10x simpler implementation that solves 80% of the problem?
+  (4) What might we regret about this decision in 6 months?
+Output: bullet list of concerns, or "No concerns — looks right-sized."
+```
+
+After CEO review output, present: `[y] proceed to impl / [r] revise plan / [n] reject`
 
 Read the task's `level` field first to determine which steps to execute.
 

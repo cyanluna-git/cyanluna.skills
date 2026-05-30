@@ -25,6 +25,43 @@ Implementing / Plan Review / Impl Review / Testing / Recently Done / Next Todo.
 BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
 ```
 
+### `/kanban context save` — Save Session State
+
+Captures current board state + git branch + decisions made this session to `.claude/kanban-context.md`.
+Use before ending a session so the next session can resume without context loss.
+
+```bash
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+DIRTY=$(git diff --stat 2>/dev/null | tail -1 || echo "")
+```
+
+Write `.claude/kanban-context.md` with:
+1. **Saved at**: timestamp + branch
+2. **In Progress**: tasks currently in `impl` / `impl_review` / `test` columns (ID, title, status)
+3. **Pending Review**: tasks in `plan_review` or `impl_review` (needs human decision)
+4. **Next Todo**: first task in `todo` column
+5. **Git State**: branch name, dirty working tree summary (`$DIRTY`)
+6. **Decisions this session**: ask user "Any decisions to note before saving?" and append their answer verbatim
+
+Add `.claude/kanban-context.md` to `.gitignore` if not already present.
+
+### `/kanban context restore` — Restore Session State
+
+Loads `.claude/kanban-context.md` if it exists, then fetches live board to show what changed since save.
+Use at session start instead of `/kanban context` when you were mid-task last session.
+
+```bash
+SAVED=$(cat .claude/kanban-context.md 2>/dev/null || echo "")
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
+```
+
+Output:
+1. Show saved state (what was in progress, decisions noted)
+2. Show current live board state
+3. Highlight any status changes since the save (tasks that moved columns)
+4. Suggest: "Resume task #ID [title]?" for the first in-progress task
+
 ### `/kanban add <title>` — Add Task
 
 1. Ask user for priority, level (L1/L2/L3), description, tags (use AskUserQuestion)
@@ -98,6 +135,85 @@ else:
     print(f"| **Total** | **{total_entries}** | **{total_tokens:,}** |")
 PY
 ```
+
+### `/kanban retro` — Retrospective Analysis
+
+Analyzes completed tasks + git history to produce a sprint retrospective report.
+Use at end of week/sprint: "kanban retro", "주간 회고", "what did we ship this week".
+
+```bash
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT")
+python3 - <<'PY'
+import json, sys, subprocess
+from collections import defaultdict
+
+board = json.loads(sys.stdin.read())
+columns = ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']
+done_tasks = board.get('done', [])
+
+print("## Retrospective\n")
+
+# --- Completed tasks ---
+print(f"### Completed: {len(done_tasks)} tasks\n")
+if done_tasks:
+    print("| ID | Title | Level | Rework |")
+    print("|----|-------|-------|--------|")
+    for t in done_tasks[-10:]:
+        rework = t.get('impl_review_count', 0) or 0
+        flag = f"⚠️ {rework}x" if rework > 1 else "✅"
+        print(f"| {t.get('id','')} | {t.get('title','')[:45]} | L{t.get('level',1)} | {flag} |")
+
+# --- Rework rate ---
+rework_tasks = [t for t in done_tasks if (t.get('impl_review_count') or 0) > 1]
+rate = len(rework_tasks) / len(done_tasks) * 100 if done_tasks else 0
+print(f"\n**Rework rate**: {rate:.0f}% ({len(rework_tasks)}/{len(done_tasks)} tasks needed re-impl)")
+
+# --- Pipeline snapshot (non-done) ---
+snapshot = {col: len(board.get(col, [])) for col in columns[:-1] if board.get(col)}
+if snapshot:
+    print("\n### Pipeline Snapshot\n")
+    print("| Column | Count |")
+    print("|--------|-------|")
+    for col, count in snapshot.items():
+        print(f"| {col} | {count} |")
+
+# --- Agent token spend (done tasks) ---
+agent_stats = defaultdict(lambda: {'entries': 0, 'tokens': 0})
+for t in done_tasks:
+    raw = t.get('agent_log')
+    if not raw:
+        continue
+    try:
+        logs = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        continue
+    for entry in logs:
+        a = entry.get('agent', 'unknown')
+        agent_stats[a]['entries'] += 1
+        agent_stats[a]['tokens'] += entry.get('tokens', 0)
+
+total = sum(v['tokens'] for v in agent_stats.values())
+if total > 0:
+    print(f"\n### Token Spend (completed): {total:,} est.\n")
+    print("| Agent | Tokens |")
+    print("|-------|--------|")
+    for a in sorted(agent_stats, key=lambda x: -agent_stats[x]['tokens']):
+        print(f"| {a} | {agent_stats[a]['tokens']:,} |")
+
+# --- Git commits ---
+git = subprocess.run(
+    ['git', 'log', '--oneline', '--since=7 days ago'],
+    capture_output=True, text=True
+)
+commits = [l for l in git.stdout.strip().split('\n') if l]
+if commits:
+    print(f"\n### Git Activity: {len(commits)} commits (last 7 days)")
+PY
+```
+
+Pass BOARD via stdin: `echo "$BOARD" | python3 -` or adjust as needed for the execution environment.
+
+To scope to a custom period (e.g. 14 days), adjust `--since=14 days ago` in the git subprocess call.
 
 ### `/kanban project` — Current Project Context (AI Context Docking)
 
