@@ -136,6 +136,86 @@ else:
 PY
 ```
 
+### `/kanban stats health` — Code Health Score
+
+Auto-detects available tools and computes a 0–10 composite code health score.
+Use when: "health check", "코드 품질 확인", "how healthy is this codebase".
+
+```bash
+python3 - <<'PY'
+import subprocess, json, sys
+
+checks = []
+
+def run(cmd, label, parse=None):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        ok = r.returncode == 0
+        detail = parse(r) if parse else ""
+        checks.append({"label": label, "ok": ok, "detail": detail})
+    except FileNotFoundError:
+        pass  # tool not installed — skip silently
+    except subprocess.TimeoutExpired:
+        checks.append({"label": label, "ok": False, "detail": "timeout"})
+
+# TypeScript
+run(["npx", "--no", "tsc", "--noEmit", "--pretty", "false"],
+    "TypeScript",
+    lambda r: f"{r.stdout.count('error TS')} errors" if r.returncode != 0 else "")
+
+# Python type check (pyright preferred, mypy fallback)
+if subprocess.run(["which", "pyright"], capture_output=True).returncode == 0:
+    run(["pyright", "--outputjson"], "Pyright",
+        lambda r: f"{json.loads(r.stdout).get('summary',{}).get('errorCount',0)} errors" if r.stdout else "")
+elif subprocess.run(["which", "mypy"], capture_output=True).returncode == 0:
+    run(["mypy", ".", "--ignore-missing-imports"], "mypy",
+        lambda r: r.stdout.strip().split('\n')[-1] if r.stdout else "")
+
+# Linter
+if subprocess.run(["which", "ruff"], capture_output=True).returncode == 0:
+    run(["ruff", "check", "--statistics"], "ruff",
+        lambda r: r.stdout.strip().split('\n')[0] if r.stdout else "")
+elif subprocess.run(["npx", "--no", "eslint", "--version"], capture_output=True).returncode == 0:
+    run(["npx", "--no", "eslint", ".", "--max-warnings=0"], "ESLint",
+        lambda r: f"{r.stdout.count('warning') + r.stdout.count('error')} issues" if r.returncode != 0 else "")
+
+# Tests
+if subprocess.run(["which", "pytest"], capture_output=True).returncode == 0:
+    run(["pytest", "--tb=no", "-q"], "pytest",
+        lambda r: r.stdout.strip().split('\n')[-1] if r.stdout else "")
+elif subprocess.run(["npx", "--no", "jest", "--version"], capture_output=True).returncode == 0:
+    run(["npx", "--no", "jest", "--passWithNoTests", "--silent"], "Jest",
+        lambda r: r.stderr.strip().split('\n')[-1] if r.stderr else "")
+
+# Rust
+run(["cargo", "check", "--quiet"], "cargo check")
+
+# Shell lint
+if subprocess.run(["which", "shellcheck"], capture_output=True).returncode == 0:
+    sh_files = subprocess.run(["find", ".", "-name", "*.sh", "-not", "-path", "*/.git/*"],
+                               capture_output=True, text=True).stdout.strip().split()
+    if sh_files:
+        run(["shellcheck"] + sh_files[:20], "shellcheck",
+            lambda r: f"{r.stdout.count('SC')} warnings" if r.returncode != 0 else "")
+
+# Score
+if not checks:
+    print("## Code Health\nNo supported tools found (tsc/pyright/ruff/pytest/jest/cargo/shellcheck).")
+    sys.exit(0)
+
+passed = sum(1 for c in checks if c["ok"])
+score = round(passed / len(checks) * 10, 1)
+grade = "🟢" if score >= 8 else "🟡" if score >= 5 else "🔴"
+
+print(f"## Code Health: {grade} {score}/10  ({passed}/{len(checks)} checks passed)\n")
+print("| Check | Status | Detail |")
+print("|-------|--------|--------|")
+for c in checks:
+    icon = "✅" if c["ok"] else "❌"
+    print(f"| {c['label']} | {icon} | {c['detail'] or ''} |")
+PY
+```
+
 ### `/kanban retro` — Retrospective Analysis
 
 Analyzes completed tasks + git history to produce a sprint retrospective report.
