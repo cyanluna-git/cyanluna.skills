@@ -23,6 +23,7 @@ license: MIT
 **When auto-triggered**: extract task ID and call `/kanban-run <ID>` — never implement code manually and patch kanban state afterward.
 
 > Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
 > Schema: read `../kanban/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## Commands

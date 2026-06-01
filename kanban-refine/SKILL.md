@@ -5,6 +5,7 @@ license: MIT
 ---
 
 > Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
 
 ## `/kanban-refine <ID>` — Refine Backlog Requirements
 

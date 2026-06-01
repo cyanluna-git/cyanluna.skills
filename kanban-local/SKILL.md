@@ -7,6 +7,8 @@ description: Local markdown-file kanban for toy and personal projects. No server
 
 로컬 `KANBAN.md` 한 파일로 모든 태스크 상태 관리. 원격 DB, 인증, 서버 불필요.
 
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
+
 ## When to Use
 
 - 토이 프로젝트, 개인 실험 레포 — PostgreSQL 칸반이 과한 경우

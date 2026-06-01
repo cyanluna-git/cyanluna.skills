@@ -5,6 +5,7 @@ license: MIT
 ---
 
 > Shared context: read `shared.md` for DB path, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Safety principles: read `principles.md` — **mandatory, not optional.**
 
 ## Commands
 

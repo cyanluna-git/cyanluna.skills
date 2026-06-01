@@ -47,6 +47,7 @@ Resume a stopped batch from the given task ID. Skips all tasks before `<start-ID
 - Accept task selectors: `500-504`, `500~504`, `500,501,504`, or whitespace-separated IDs.
 - Reverse ranges like `504-500` are normalized to ascending order.
 - Read `../kanban/shared.md` before any API call.
+- Read `../kanban/principles.md` — **mandatory, not optional.**
 - Invoke `kanban-run` and `kanban-refine` for each task via the Skill tool when available.
 - In Codex environments without the Skill tool, invoke via `$kanban-run ...` / `$kanban-refine ...` directly.
 - Do not emulate or re-implement either pipeline.

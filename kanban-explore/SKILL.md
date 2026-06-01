@@ -5,6 +5,7 @@ license: MIT
 ---
 
 > Shared context: read `../kanban/shared.md` for DB path, pipeline levels, status transitions, API endpoints, and error handling.
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
 
 ## `/kanban-explore [topic]` — Explore & Plan
 

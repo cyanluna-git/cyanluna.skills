@@ -5,6 +5,7 @@ license: MIT
 ---
 
 > Shared context: read `../kanban/shared.md` for API endpoints, auth, and task creation format.
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
 
 ## `/kanban-spec [title]` — New Feature Spec
 
