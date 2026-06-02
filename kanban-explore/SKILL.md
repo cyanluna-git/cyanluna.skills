@@ -4,7 +4,8 @@ description: Codebase exploration skill for uncertain implementation direction. 
 license: MIT
 ---
 
-> Shared context: read `../kanban/shared.md` for DB path, pipeline levels, status transitions, API endpoints, and error handling.
+> Shared context: read `../kanban/shared.md` for DB path, pipeline levels, status transitions, DB operations, and error handling.
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
 
 ## `/kanban-explore [topic]` — Explore & Plan
 
@@ -74,9 +75,58 @@ This skill explores first, reports direction, then seeds the kanban board with p
    If you cannot find evidence for something, say "not found" — do not guess.
    ───────────────────────────────────────────────
 
+② ½ Architecture planning (Agent → Plan subagent)
+
+   Save the Explore agent's output as $EXPLORE_FINDINGS.
+   Launch a second Agent subagent with subagent_type="Plan".
+   Pass the following prompt — fill in <TOPIC>, <PROJECT>, and <EXPLORE_FINDINGS>:
+
+   ───────────────────────────────────────────────
+   You are performing architecture planning for the topic: "<TOPIC>"
+   Project: <PROJECT>
+
+   ## Codebase Findings (from Explore agent)
+   <EXPLORE_FINDINGS>
+
+   ## Your Task
+   Based on the above codebase findings, produce the following three sections:
+
+   ### 1. Possible Directions (2–3 options, only genuinely distinct ones)
+   For each direction:
+   - **Name**: concise label
+   - **Approach**: 1–2 sentences, concrete not abstract
+   - **Pros**: bulleted list
+   - **Cons**: bulleted list
+   - **Estimated complexity**: Low / Medium / High
+   - **Files likely touched**: list specific files cited in the findings
+   - **Risk**: any architectural risks or unknowns
+
+   ### 2. Recommended Direction
+   State which direction you recommend and WHY, citing specific file paths from the codebase findings.
+   If only one direction makes sense, say so — do not fabricate alternatives.
+
+   ### 3. Phased Task Breakdown (for the recommended direction)
+   3–7 tasks in logical implementation order. Each task must be completable independently.
+   The last task must always be E2E tests ("Add E2E tests for <topic>").
+
+   For each task:
+   - **Title**: concise imperative phrase
+   - **Phase**: sequential number
+   - **Rationale**: 1 sentence — why this step at this phase
+   - **Files**: specific files this task will touch (from findings)
+   - **Complexity**: Low / Medium / High
+
+   Honesty rules:
+   - Every claim must reference a file path from the Explore findings.
+   - If something is unclear from the codebase, say "unclear — needs investigation".
+   - Do not invent patterns that were not found in the codebase.
+   ───────────────────────────────────────────────
+
+   Save this output as $PLAN_OUTPUT.
+
 ③ Write the Exploration Report
 
-   Using the Explore agent's output, write the following report.
+   Using $EXPLORE_FINDINGS (Explore agent) and $PLAN_OUTPUT (Plan agent), write the following report.
    This report will be stored permanently in the kanban board.
 
    ┌─────────────────────────────────────────────┐
@@ -186,18 +236,30 @@ This skill explores first, reports direction, then seeds the kanban board with p
      | 2     | #id2 | Refactor Y         | medium   | L2    |
      ...
 
-   Use API:
+   Use SQLite (see shared.md → JSON Safety for multi-line text):
    ```bash
-   # Create task
-   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
-     -H 'Content-Type: application/json' \
-     -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"high\",
-          \"level\": 3, \"description\": \"...\", \"tags\": \"...\"}"
+   # Create task (use Python for safe text insertion)
+   python3 - <<PY
+   import sqlite3 as sq
+   conn = sq.connect("$DB")
+   cur = conn.execute(
+       "INSERT INTO tasks (project, title, description, priority, level, status, tags) VALUES (?, ?, ?, ?, ?, 'todo', ?)",
+       ("$PROJECT", title, description, priority, level, tags_json)
+   )
+   print(cur.lastrowid)
+   conn.commit()
+   conn.close()
+   PY
 
-   # Patch report anchor
-   curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$REPORT_ID?project=$PROJECT" \
-     -H 'Content-Type: application/json' \
-     -d "{\"description\": \"<updated description with task index>\"}"
+   # Patch report anchor description
+   python3 - <<PY
+   import sqlite3 as sq
+   conn = sq.connect("$DB")
+   conn.execute("UPDATE tasks SET description=?, updated_at=datetime('now') WHERE id=? AND project=?",
+                (updated_description, report_id, "$PROJECT"))
+   conn.commit()
+   conn.close()
+   PY
    ```
 
 ⑥ Output final summary

@@ -4,7 +4,7 @@ description: Scan kanban boards for stagnant tasks and optionally mark them. Det
 license: MIT
 ---
 
-> Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Shared context: read `../kanban/shared.md` for DB path, pipeline levels, status transitions, DB operations, error handling, and agent context flow.
 > Schema: read `../kanban/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## `/kanban-heartbeat [--project X] [--days N] [--dry-run]` -- Stagnant Task Detection
@@ -17,17 +17,15 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 ### Procedure
 
 ```
-① Auth & Argument Setup
+① DB Setup & Argument Parsing
 
-   Load credentials using the standard shared.md pattern:
-
-   KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-   BASE_URL=$(grep '^KANBAN_BASE_URL=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-   AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-   AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
+   Read project config and DB path:
+   CONFIG=$(cat .claude/kanban.json 2>/dev/null || cat .codex/kanban.json 2>/dev/null)
+   PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
+   DB="$HOME/.claude/kanban-dbs/${PROJECT}.db"
 
    Parse CLI arguments:
-   - --project X  → scan only project X (default: all active projects)
+   - --project X  → scan only project X (override PROJECT)
    - --days N     → stagnation threshold in days (default: 3)
    - --dry-run    → report only, do not write agent_log entries
 
@@ -35,53 +33,46 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
    If --project X specified:
      Validate project exists:
-     curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$X"
-     If 404 → print error "Project '$X' not found." and exit.
+     sqlite3 "$DB" "SELECT id FROM projects WHERE id='$X'"
+     If empty → print error "Project '$X' not found." and exit.
      PROJECTS=("$X")
 
-   Else (all projects):
-     ALL=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects")
-     Extract active projects:
-     PROJECTS = jq '.projects[] | select(.status == "active") | .id' from ALL
+   Else:
+     PROJECTS = sqlite3 "$DB" "SELECT id FROM projects WHERE status='active'"
+     If no active projects → scan using PROJECT from config
 
-③ Fetch Board per Project (full view)
+③ Fetch Tasks per Project (active columns only)
 
    For each project P in PROJECTS:
-     BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$P")
+     sqlite3 -json "$DB" "SELECT id, title, status, agent_log, created_at FROM tasks
+       WHERE project='$P' AND status IN ('todo','plan','plan_review','impl','impl_review','test')
+       ORDER BY id"
 
-     Collect tasks from columns: todo, plan, plan_review, impl, impl_review, test
-     SKIP the done column entirely.
-
-     If project has 0 tasks across all active columns → skip silently, continue.
+     If project has 0 tasks → skip silently, continue.
 
 ④ Extract Last Activity Timestamp per Task
 
-   For each task in collected tasks:
+   For each task, use Python for safe JSON parsing of agent_log:
 
-     Use Python for safe JSON parsing:
+   python3 -c "
+   import json, sys
+   task = json.loads(sys.stdin.read())
+   agent_log_raw = task.get('agent_log') or '[]'
+   try:
+       log = json.loads(agent_log_raw)
+       if isinstance(log, list) and len(log) > 0:
+           timestamps = [e.get('timestamp', '') for e in log if isinstance(e, dict)]
+           timestamps = [t for t in timestamps if t]
+           if timestamps:
+               print(max(timestamps))
+               sys.exit(0)
+   except (json.JSONDecodeError, TypeError):
+       print('PARSE_ERROR', file=sys.stderr)
+   # Fallback to created_at
+   print(task.get('created_at', ''))
+   "
 
-     python3 -c "
-     import json, sys
-     task = json.loads(sys.stdin.read())
-     agent_log_raw = task.get('agent_log') or '[]'
-     try:
-         log = json.loads(agent_log_raw)
-         if isinstance(log, list) and len(log) > 0:
-             timestamps = [e.get('timestamp', '') for e in log if isinstance(e, dict)]
-             timestamps = [t for t in timestamps if t]
-             if timestamps:
-                 print(max(timestamps))
-                 sys.exit(0)
-     except (json.JSONDecodeError, TypeError):
-         print('PARSE_ERROR', file=sys.stderr)
-     # Fallback to created_at
-     print(task.get('created_at', ''))
-     "
-
-     If PARSE_ERROR was emitted to stderr:
-       Print warning: "Warning: task #$ID has malformed agent_log, falling back to created_at"
-
-     Store: task ID, project, status, title, last_activity_ts
+   Store: task ID, project, status, title, last_activity_ts
 
 ⑤ Compute Stagnation
 
@@ -114,55 +105,20 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
 ⑦ Write agent_log Entries (skip if --dry-run)
 
-   For each stagnant task:
+   For each stagnant task, append a Heartbeat entry using sqlite3 json_insert:
 
-     Use Python for safe JSON construction and API calls:
-
-     python3 -c "
-     import subprocess, json, datetime, sys
-
-     task_id = sys.argv[1]
-     project = sys.argv[2]
-     days = int(sys.argv[3])
-     status = sys.argv[4]
-     last_ts = sys.argv[5]
-     base_url = sys.argv[6]
-     auth_token = sys.argv[7]
-
-     auth_header = ['-H', f'X-Kanban-Auth: {auth_token}'] if auth_token else []
-     now = datetime.datetime.utcnow().isoformat() + 'Z'
-
-     # Fetch current agent_log
-     result = subprocess.run(
-         ['curl', '-s', f'{base_url}/api/task/{task_id}?project={project}&fields=agent_log']
-         + auth_header,
-         capture_output=True, text=True
-     )
-     data = json.loads(result.stdout)
-     try:
-         log = json.loads(data.get('agent_log') or '[]')
-     except (json.JSONDecodeError, TypeError):
-         log = []
-
-     # Append heartbeat entry
-     log.append({
-         'agent': 'Heartbeat',
-         'model': 'system',
-         'message': f'⚠️ Stagnant {days} days in {status}. Last activity: {last_ts}',
-         'timestamp': now
-     })
-
-     # Write back
-     payload = json.dumps({'agent_log': json.dumps(log)})
-     subprocess.run(
-         ['curl', '-s', *auth_header, '-X', 'PATCH',
-          f'{base_url}/api/task/{task_id}?project={project}',
-          '-H', 'Content-Type: application/json',
-          '-d', payload],
-         capture_output=True
-     )
-     print(f'  Heartbeat written to task #{task_id}')
-     " "$TASK_ID" "$PROJECT" "$DAYS" "$STATUS" "$LAST_TS" "$BASE_URL" "$AUTH_TOKEN"
+   NEW_ENTRY=$(python3 -c "
+   import json, datetime
+   entry = {
+     'agent': 'Heartbeat',
+     'model': 'system',
+     'message': f'⚠️ Stagnant {DAYS} days in {STATUS}. Last activity: {LAST_TS}',
+     'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'
+   }
+   print(json.dumps(entry))
+   ")
+   sqlite3 "$DB" "UPDATE tasks SET agent_log=json_insert(COALESCE(agent_log,'[]'), '\$[#]', json('$NEW_ENTRY')), updated_at=datetime('now') WHERE id=$TASK_ID AND project='$PROJECT'"
+   echo "  Heartbeat written to task #$TASK_ID"
 
    Print: "agent_log entries written for X tasks."
 ```
@@ -173,7 +129,7 @@ The executing agent should run this as a single Python script for reliability:
 
 ```bash
 python3 - "$@" <<'PYEOF'
-import subprocess, json, sys, datetime, re
+import sqlite3 as sq, json, sys, datetime, re, os, pathlib
 
 # ── Parse arguments ──────────────────────────────────────────────
 args = sys.argv[1:]
@@ -192,126 +148,119 @@ while i < len(args):
     else:
         i += 1
 
-# ── Auth setup ───────────────────────────────────────────────────
-import pathlib, os
-auth_file = pathlib.Path.home() / ".claude" / "kanban-auth"
-base_url = "https://cyanlunakanban.vercel.app"
-auth_token = ""
+# ── DB Setup ─────────────────────────────────────────────────────
+import subprocess
+config_paths = [".claude/kanban.json", ".codex/kanban.json"]
+project_name = None
+for p in config_paths:
+    if os.path.exists(p):
+        try:
+            d = json.loads(open(p).read())
+            project_name = d.get("project")
+            break
+        except Exception:
+            pass
+if not project_name:
+    project_name = os.path.basename(os.getcwd())
 
-if auth_file.exists():
-    for line in auth_file.read_text().splitlines():
-        if line.startswith("KANBAN_BASE_URL="):
-            base_url = line.split("=", 1)[1]
-        elif line.startswith("KANBAN_AUTH_TOKEN="):
-            auth_token = line.split("=", 1)[1]
+db_path = str(pathlib.Path.home() / ".claude" / "kanban-dbs" / f"{project_name}.db")
+if not os.path.exists(db_path):
+    print(f"Error: DB not found at {db_path}. Run /kanban-init first.")
+    sys.exit(1)
 
-def curl_get(url):
-    cmd = ["curl", "-s", url]
-    if auth_token:
-        cmd += ["-H", f"X-Kanban-Auth: {auth_token}"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    return json.loads(r.stdout)
-
-def curl_patch(url, payload):
-    cmd = ["curl", "-s", "-X", "PATCH", url, "-H", "Content-Type: application/json", "-d", json.dumps(payload)]
-    if auth_token:
-        cmd += ["-H", f"X-Kanban-Auth: {auth_token}"]
-    subprocess.run(cmd, capture_output=True)
+conn = sq.connect(db_path)
+conn.row_factory = sq.Row
 
 # ── Fetch projects ───────────────────────────────────────────────
 if project_filter:
-    try:
-        proj_data = curl_get(f"{base_url}/api/projects/{project_filter}")
-        if "error" in proj_data:
+    row = conn.execute("SELECT id FROM projects WHERE id=?", (project_filter,)).fetchone()
+    if not row:
+        # Fall back: check if project has tasks even without projects table entry
+        count = conn.execute("SELECT count(*) FROM tasks WHERE project=?", (project_filter,)).fetchone()[0]
+        if count == 0:
             print(f"Error: Project '{project_filter}' not found.")
             sys.exit(1)
-        projects = [project_filter]
-    except Exception:
-        print(f"Error: Project '{project_filter}' not found.")
-        sys.exit(1)
+    projects = [project_filter]
 else:
-    all_proj = curl_get(f"{base_url}/api/projects")
-    projects = [p["id"] for p in all_proj.get("projects", []) if p.get("status") == "active"]
+    rows = conn.execute("SELECT id FROM projects WHERE status='active'").fetchall()
+    projects = [r["id"] for r in rows]
+    if not projects:
+        # Fall back to the project from config
+        projects = [project_name]
 
 if not projects:
     print("No active projects found.")
     sys.exit(0)
 
-# ── Scan boards ──────────────────────────────────────────────────
+# ── Scan tasks ───────────────────────────────────────────────────
 now = datetime.datetime.utcnow()
-active_columns = ["todo", "plan", "plan_review", "impl", "impl_review", "test"]
+active_columns = ("todo", "plan", "plan_review", "impl", "impl_review", "test")
 stagnant_tasks = []
 
 for proj in projects:
-    try:
-        board = curl_get(f"{base_url}/api/board?project={proj}")
-    except Exception:
-        print(f"Warning: failed to fetch board for project '{proj}', skipping.", file=sys.stderr)
-        continue
+    rows = conn.execute(
+        "SELECT id, title, status, agent_log, created_at FROM tasks WHERE project=? AND status IN ({})".format(
+            ",".join("?" * len(active_columns))
+        ),
+        (proj, *active_columns)
+    ).fetchall()
 
-    for col in active_columns:
-        tasks = board.get(col, [])
-        if not isinstance(tasks, list):
-            continue
-        for task in tasks:
-            task_id = task.get("id")
-            title = task.get("title", "(untitled)")
-            status = task.get("status", col)
-            created_at = task.get("created_at", "")
-            agent_log_raw = task.get("agent_log")
+    for task in rows:
+        task_id = task["id"]
+        title = task["title"] or "(untitled)"
+        status = task["status"]
+        created_at = task["created_at"] or ""
+        agent_log_raw = task["agent_log"]
 
-            # Extract last activity timestamp
-            last_ts = None
-            parse_error = False
-            if agent_log_raw:
-                try:
-                    log = json.loads(agent_log_raw) if isinstance(agent_log_raw, str) else agent_log_raw
-                    if isinstance(log, list) and len(log) > 0:
-                        timestamps = [e.get("timestamp", "") for e in log if isinstance(e, dict)]
-                        timestamps = [t for t in timestamps if t]
-                        if timestamps:
-                            last_ts = max(timestamps)
-                except (json.JSONDecodeError, TypeError):
-                    parse_error = True
-
-            if last_ts is None:
-                last_ts = created_at
-                if parse_error:
-                    print(f"Warning: task #{task_id} has malformed agent_log, falling back to created_at", file=sys.stderr)
-
-            if not last_ts:
-                print(f"Warning: task #{task_id} has no timestamp at all, skipping", file=sys.stderr)
-                continue
-
-            # Parse timestamp and compute days
+        # Extract last activity timestamp
+        last_ts = None
+        parse_error = False
+        if agent_log_raw:
             try:
-                # Handle various ISO formats
-                clean_ts = re.sub(r"\.\d+", "", last_ts.replace("Z", "+00:00").replace("+00:00", ""))
-                ts_dt = datetime.datetime.fromisoformat(clean_ts)
-            except (ValueError, AttributeError):
-                print(f"Warning: task #{task_id} has unparseable timestamp '{last_ts}', skipping", file=sys.stderr)
-                continue
+                log = json.loads(agent_log_raw) if isinstance(agent_log_raw, str) else agent_log_raw
+                if isinstance(log, list) and len(log) > 0:
+                    timestamps = [e.get("timestamp", "") for e in log if isinstance(e, dict)]
+                    timestamps = [t for t in timestamps if t]
+                    if timestamps:
+                        last_ts = max(timestamps)
+            except (json.JSONDecodeError, TypeError):
+                parse_error = True
 
-            days_stagnant = (now - ts_dt).days
-            if days_stagnant >= days_threshold:
-                stagnant_tasks.append({
-                    "id": task_id,
-                    "project": proj,
-                    "status": status,
-                    "days": days_stagnant,
-                    "title": title,
-                    "last_ts": last_ts,
-                })
+        if last_ts is None:
+            last_ts = created_at
+            if parse_error:
+                print(f"Warning: task #{task_id} has malformed agent_log, falling back to created_at", file=sys.stderr)
+
+        if not last_ts:
+            print(f"Warning: task #{task_id} has no timestamp, skipping", file=sys.stderr)
+            continue
+
+        # Parse timestamp
+        try:
+            clean_ts = re.sub(r"\.\d+", "", last_ts.replace("Z", "").replace("+00:00", ""))
+            ts_dt = datetime.datetime.fromisoformat(clean_ts)
+        except (ValueError, AttributeError):
+            print(f"Warning: task #{task_id} has unparseable timestamp '{last_ts}', skipping", file=sys.stderr)
+            continue
+
+        days_stagnant = (now - ts_dt).days
+        if days_stagnant >= days_threshold:
+            stagnant_tasks.append({
+                "id": task_id,
+                "project": proj,
+                "status": status,
+                "days": days_stagnant,
+                "title": title,
+                "last_ts": last_ts,
+            })
 
 # ── Output ───────────────────────────────────────────────────────
 if not stagnant_tasks:
     print("No stagnant tasks found.")
     sys.exit(0)
 
-# Sort by days descending
 stagnant_tasks.sort(key=lambda t: t["days"], reverse=True)
 
-# Markdown table
 print("")
 print("| ID | Project | Status | Days | Title |")
 print("|----|---------|--------|------|-------|")
@@ -333,28 +282,30 @@ print("")
 written = 0
 for t in stagnant_tasks:
     try:
-        task_data = curl_get(f"{base_url}/api/task/{t['id']}?project={t['project']}&fields=agent_log")
+        row = conn.execute("SELECT agent_log FROM tasks WHERE id=? AND project=?", (t["id"], t["project"])).fetchone()
         try:
-            log = json.loads(task_data.get("agent_log") or "[]")
+            log = json.loads(row["agent_log"] or "[]")
         except (json.JSONDecodeError, TypeError):
             log = []
 
         log.append({
             "agent": "Heartbeat",
             "model": "system",
-            "message": f"\u26a0\ufe0f Stagnant {t['days']} days in {t['status']}. Last activity: {t['last_ts']}",
+            "message": f"⚠️ Stagnant {t['days']} days in {t['status']}. Last activity: {t['last_ts']}",
             "timestamp": now.isoformat() + "Z",
         })
 
-        curl_patch(
-            f"{base_url}/api/task/{t['id']}?project={t['project']}",
-            {"agent_log": json.dumps(log)},
+        conn.execute(
+            "UPDATE tasks SET agent_log=?, updated_at=datetime('now') WHERE id=? AND project=?",
+            (json.dumps(log), t["id"], t["project"])
         )
+        conn.commit()
         print(f"  Heartbeat written to task #{t['id']}")
         written += 1
     except Exception as e:
         print(f"  Error writing to task #{t['id']}: {e}", file=sys.stderr)
 
 print(f"\nagent_log entries written for {written} tasks.")
+conn.close()
 PYEOF
 ```

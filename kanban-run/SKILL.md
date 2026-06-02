@@ -1,10 +1,29 @@
 ---
 name: kanban-run
-description: Run the AI team pipeline for kanban tasks — orchestration loop with 6 agents (Planner, Critic, Builder, Shield, Inspector, Ranger), single-step execution, and code review. Use /kanban-run to execute tasks through the 7-column pipeline.
+description: Run the AI team pipeline for kanban tasks — orchestration loop with 6 agents (Planner, Critic, Builder, Shield, Inspector, Ranger), single-step execution, and code review. Use /kanban-run to execute tasks through the 7-column pipeline. AUTO-TRIGGER when: user says "implement task NNN" or any task ID + implement/build/do combination; or user confirms with "yes/ok/go/do it" after Claude proposes implementing a specific kanban task.
 license: MIT
 ---
 
-> Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+## Auto-Trigger Rules
+
+**ALWAYS invoke this skill (without waiting for `/kanban-run`) when:**
+
+1. User mentions a kanban task ID and requests implementation:
+   - "implement task #NNN" / "build task NNN" / "do NNN" / "run NNN"
+   - Korean equivalents: "태스크 NNN 구현해줘" / "NNN 해줘" / "NNN 번 작업해줘"
+   - Any message pairing a task number with implement / build / work on / do
+
+2. Claude has proposed implementing a specific kanban task and the user confirms:
+   - Pattern: Claude says "Shall I implement task #NNN [title]?" → User replies "yes", "ok", "go", "do it", "응", "해줘", "그래", "ㅇㅇ"
+   - This confirmation **must** trigger `/kanban-run <ID>` automatically — do not implement manually
+
+3. User says "next task" / "continue" / "다음 태스크 해줘" when a task is in progress:
+   - Fetch board context first, identify next todo task, then run it
+
+**When auto-triggered**: extract task ID and call `/kanban-run <ID>` — never implement code manually and patch kanban state afterward.
+
+> Shared context: read `../kanban/shared.md` for DB path, pipeline levels, status transitions, DB operations, error handling, and agent context flow.
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
 > Schema: read `../kanban/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## Commands
@@ -33,13 +52,30 @@ L2 Standard:
 
 L3 Full:
   todo → Plan Agent(planner) → plan_review
-  plan_review → Review Agent(critic) → [user confirm] → impl / reject → plan
+  plan_review → Review Agent(critic) → [user confirm: y/c/n] → impl / ceo-review / reject→plan
+    └─ [c] CEO Review: product angle check → update plan → back to plan_review
   impl → Worker(builder) + TDD Tester(shield) → impl_review
   impl_review → Code Review(inspector) → [user confirm] → test / reject → impl
   test → Test Runner(ranger) → pass → commit → done / fail → impl
 
 Circuit breaker: plan_review_count > 3 OR impl_review_count > 3 → stop, ask user
 ```
+
+**CEO Review (L3 plan_review only)**
+
+When the user selects `[c]` at the plan_review confirmation prompt, run a CEO-perspective analysis inline before proceeding to `impl`. Not a separate agent — run as a structured prompt to the current model:
+
+```
+Adopt the perspective of a skeptical product founder reviewing this plan.
+Ask:
+  (1) Is this feature actually necessary, or can the need be met more simply?
+  (2) Does this align with the project's stated purpose? [load from project brief]
+  (3) Is there a 10x simpler implementation that solves 80% of the problem?
+  (4) What might we regret about this decision in 6 months?
+Output: bullet list of concerns, or "No concerns — looks right-sized."
+```
+
+After CEO review output, present: `[y] proceed to impl / [r] revise plan / [n] reject`
 
 Read the task's `level` field first to determine which steps to execute.
 

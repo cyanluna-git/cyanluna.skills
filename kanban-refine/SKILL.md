@@ -4,7 +4,8 @@ description: Refine backlog requirements through structured user interview. Turn
 license: MIT
 ---
 
-> Shared context: read `../kanban/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Shared context: read `../kanban/shared.md` for DB path, pipeline levels, status transitions, DB operations, error handling, and agent context flow.
+> Safety principles: read `../kanban/principles.md` — **mandatory, not optional.**
 
 ## `/kanban-refine <ID>` — Refine Backlog Requirements
 
@@ -16,11 +17,33 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 
 ```
 ① Read the task
-   TASK = curl GET /api/task/$ID?project=$PROJECT
+   TASK = sqlite3 -json "$DB" "SELECT id, title, description, priority, level, tags FROM tasks WHERE id=$ID AND project='$PROJECT'"
    Extract: title, description, priority, level, tags
+
+① ½. Look for prior implementation context (always run this before the interview)
+
+   a. Check description and tags for dependency hints:
+      - "Depends on: #NNN" lines in description
+      - Tags like "after:NNN", "follows:NNN"
+
+   b. If dependency found → fetch that card's implementation output:
+      PRIOR = sqlite3 -json "$DB" "SELECT title, implementation_notes, plan FROM tasks WHERE id=$NNN AND project='$PROJECT'"
+      Also inspect the actual codebase: read files, interfaces, schemas confirmed in that card.
+
+   c. If no explicit dependency → ask ONE question before the main interview:
+      "Is there a prior task whose implementation this builds on? (task ID or 'none')"
+      If the user gives an ID, fetch it as in (b).
+      If "none" or new work → skip, proceed with regular interview.
+
+   d. Summarize what was confirmed from prior implementation:
+      PRIOR_CONTEXT = {
+        confirmed interfaces, schemas, file paths, component names, API routes, etc.
+      }
+      This context is injected into ③ (gap analysis) and ⑤ (description synthesis).
 
 ② Display current state
    Show the user their raw title + description as-is.
+   If PRIOR_CONTEXT exists, also show: "Prior implementation context: [summary]"
 
 ③ Analyze for gaps
    Identify what's missing or vague across these dimensions:
@@ -43,10 +66,16 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - Use concrete options when possible, not open-ended questions
 
 ⑤ Synthesize refined description
-   Rewrite the description using this template:
+   Rewrite the description using this template.
+   If PRIOR_CONTEXT exists, ground scope/requirements/constraints in confirmed interfaces
+   and file paths from the prior implementation — not assumptions.
 
    ## Goal
    [1–2 sentences: what this task achieves and why]
+
+   ## Prior Implementation Context  ← include only if PRIOR_CONTEXT exists
+   [Confirmed interfaces, schemas, components, or file paths from the prior card
+    that this task directly builds on. e.g. "POST /api/items → {id, name} per #201"]
 
    ## Scope
    - IN: [bulleted list of what's included]
@@ -75,10 +104,10 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 
 ⑦ Save
    If approved:
-   - PATCH description via API
+   - sqlite3 "$DB" "UPDATE tasks SET description='...', updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
    - Also update title if it was clarified during interview
    - Update level/priority/tags if discussed
-   - Append to agent_log:
+   - Append to agent_log (see shared.md → JSON 필드 조작):
      { "agent": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "timestamp": "..." }
 
 ### Model Routing

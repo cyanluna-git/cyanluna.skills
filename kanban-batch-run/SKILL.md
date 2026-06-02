@@ -1,32 +1,38 @@
 ---
 name: kanban-batch-run
-description: Run multiple kanban tasks end-to-end in planned order using the existing kanban and kanban-run workflows. Use when the user wants a batch such as `500-504`, `500,501,504`, or a short ordered task list executed automatically, with conservative sequencing by default and parallel execution only when tasks are clearly independent.
+description: Run multiple kanban tasks end-to-end in Rolling Wave order — refine each task based on the prior card's actual implementation, then implement, then verify, then refine the next. Use for epic-level batch execution. --big-bang flag disables rolling wave for simple independent tasks.
 ---
 
 # Kanban Batch Run
 
-Execute several kanban tasks as one orchestrated batch. Expand task ranges, sort them by phase, run them one after another, and only open parallel lanes when independence is explicit and low-risk.
+Execute several kanban tasks as one orchestrated batch using **Rolling Wave Planning** by default.
 
-This skill is an orchestrator, not a shortcut. For every task it runs, it must hand off to the `kanban-run` skill and keep that task's pipeline honest.
+Default loop per task:
+```
+refine(N) → implement(N) → verify(N) → refine(N+1) → implement(N+1) → ...
+```
+
+This skill is an orchestrator, not a shortcut. Every implement step hands off to `kanban-run`. Every refine step hands off to `kanban-refine`.
 
 ## Codex Invocation Rule
 
-When running inside Codex, if a dedicated Skill tool is not available, invoke the inner runner by issuing the slash command text directly:
+When running inside Codex, if a dedicated Skill tool is not available, invoke the inner runners by issuing slash command text directly:
 
-- `$kanban-run <ID>`
-- `$kanban-run <ID> --auto`
+- `$kanban-run <ID>` / `$kanban-run <ID> --auto`
+- `$kanban-refine <ID>`
 
-Treat this as the Codex-native equivalent of `Skill(skill="kanban-run", args="...")`.
-Do not re-implement the `kanban-run` pipeline manually when this command path is available.
+Treat these as the Codex-native equivalent of `Skill(skill="kanban-run", ...)` and `Skill(skill="kanban-refine", ...)`.
+Do not re-implement either pipeline manually when this command path is available.
 
 ## Commands
 
-### `/kanban-batch-run <selector> [--auto]`
+### `/kanban-batch-run <selector> [--auto] [--big-bang]`
 
 Run all tasks matching the selector in dependency order.
 
-- **Default mode**: L1 tasks run with `--auto`. L2/L3 tasks run without `--auto` so that plan_review and impl_review pause for user confirmation.
-- **`--auto`**: All tasks run with `--auto` regardless of level. Circuit breakers still fire inside `kanban-run`.
+- **Default (Rolling Wave)**: refine(N) → implement(N) → verify(N) → repeat. L2/L3 tasks pause at review checkpoints for user confirmation.
+- **`--auto`**: auto-approve all review checkpoints inside `kanban-run`. Refine and Verify always run.
+- **`--big-bang`**: skip rolling wave — implement tasks directly without pre-refine or verify steps. Use only when tasks are fully refined upfront and independent.
 
 ### `/kanban-batch-run resume <start-ID> [--auto]`
 
@@ -34,12 +40,13 @@ Resume a previously stopped batch from the given task ID onward. Uses the same s
 
 ## Inputs
 
-- Accept task selectors like `500-504`, `500~504`, `500,501,504`, or whitespace-separated IDs.
-- Reverse ranges like `504-500` are normalized to ascending order (500, 501, 502, 503, 504).
-- Read `../kanban/shared.md` before any API call.
-- Invoke `kanban-run` for each individual task using the Skill tool when available.
-- In Codex environments without the Skill tool, invoke `kanban-run` by issuing `$kanban-run ...` directly.
-- Do not emulate or re-implement the pipeline if one of the above invocation paths is available.
+- Accept task selectors: `500-504`, `500~504`, `500,501,504`, or whitespace-separated IDs.
+- Reverse ranges like `504-500` are normalized to ascending order.
+- Read `../kanban/shared.md` before any DB access.
+- Read `../kanban/principles.md` — **mandatory, not optional.**
+- Invoke `kanban-run` and `kanban-refine` for each task via the Skill tool when available.
+- In Codex environments without the Skill tool, invoke via `$kanban-run ...` / `$kanban-refine ...` directly.
+- Do not emulate or re-implement either pipeline.
 
 ## Resources
 
@@ -64,12 +71,13 @@ If these hints are absent, fall back to conservative inference from phase, tags,
 Before any execution:
 
 ```bash
-# Server health check
-curl -sf "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true" > /dev/null
+# DB reachability check
+test -f "$DB" || { echo "Error: DB not found at $DB. Run /kanban-init first."; exit 1; }
+sqlite3 "$DB" "SELECT count(*) FROM tasks WHERE project='$PROJECT'" > /dev/null
 ```
 
-- If the server is not reachable, instruct the user to run `./kanban-board/start.sh` and stop.
-- If `plan_batch.py` fails (connection refused, HTTP error), do not proceed — report the error and stop.
+- If DB not found: instruct the user to run `/kanban-init` and stop.
+- If `plan_batch.py` fails, do not proceed — report the error and stop.
 
 ### 1. Resolve project
 
@@ -80,7 +88,7 @@ Resolve the current project from `.codex/kanban.json` or `.claude/kanban.json`.
 Run:
 
 ```bash
-python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>" --base-url "$BASE_URL" --auth-token "$AUTH_TOKEN"
+python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>" --db "$DB"
 ```
 
 ### 3. Read plan
@@ -105,7 +113,35 @@ Read the returned task list and proposed groups.
 - If any doubt remains, stay sequential.
 - Prefer explicit `Depends on:` / `Parallel-safe:` metadata over heuristic guesses.
 
-### 6. Execute each group
+### 6. Execute — Rolling Wave Loop (default)
+
+For each task N in order:
+
+```
+A. Refine(N)
+   - Skill(skill="kanban-refine", args="<ID>")  [Codex: $kanban-refine <ID>]
+   - kanban-refine auto-detects the prior card (N-1) via "Depends on:" tags or asks one question.
+   - First task in the batch (no prior card): regular user interview.
+
+B. Implement(N)
+   - Invoke kanban-run (level-aware, see Inner Task Contract)
+
+C. Verify(N)
+   - Check actual implementation: git diff, created/modified files, test results
+   - Append note to task: sqlite3 "$DB" json_insert on notes field → "Verified: [confirmed interface/schema]"
+   - Note anything that will affect N+1's refinement scope
+
+→ Move to N+1
+```
+
+**Loop exceptions:**
+- Circuit breaker or blocker during Implement → stop, report resume point
+- Unexpected design change during Verify → update downstream task descriptions; report to user
+
+### 6b. Execute — Big Bang mode (`--big-bang`)
+
+Invoke `kanban-run` directly per task. No refine or verify steps.
+Use only when all tasks were fully refined before the batch started.
 
 **Sequential group**: invoke `kanban-run` for each task in order (see Inner Task Contract for level-aware invocation).
 
@@ -120,7 +156,7 @@ Read the returned task list and proposed groups.
   ```
 - If conflict markers or merge issues are found, stop the batch and report which tasks conflicted.
 
-**After each task or group**: refresh board state by reading the task's current status from the API before continuing.
+**After each task or group**: refresh board state by reading the task's current status from SQLite before continuing.
 
 ### 7. Stop conditions
 
@@ -192,7 +228,7 @@ In default mode, L2/L3 tasks pause for user confirmation at review checkpoints. 
 After each Skill call completes, verify the outcome by checking the task's kanban status:
 
 ```bash
-STATUS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+STATUS=$(sqlite3 "$DB" "SELECT status FROM tasks WHERE id=$ID AND project='$PROJECT'")
 ```
 
 | Status | Interpretation | Action |
