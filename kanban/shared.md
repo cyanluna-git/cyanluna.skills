@@ -1,61 +1,26 @@
 # Kanban Shared Context
 
-Manages project tasks in **PostgreSQL** via the kanban-board HTTP API.
-All projects share a single centralized DB on the deployed Vercel board.
+Manages project tasks in **SQLite** (per-project file at `~/.claude/kanban-dbs/{project}.db`).
+Local-first: no server, no auth, no internet required.
 
 ## DB Path & Project Config
 
-Read project config from `.codex/kanban.json` or `.claude/kanban.json` (created by `/kanban-init`).
-Auth credentials are loaded from the global `~/.claude/kanban-auth` file (shared across all projects).
+Read project config from `.claude/kanban.json` (created by `/kanban-init`):
 
 ```bash
-# 1. Project config (project name only)
-CONFIG=$(cat .codex/kanban.json 2>/dev/null || cat .claude/kanban.json 2>/dev/null)
+CONFIG=$(cat .claude/kanban.json 2>/dev/null || cat .codex/kanban.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
-
-# 2. Auth from ~/.claude/kanban-auth (global, shared across projects)
-KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-if [ -f "$KANBAN_AUTH_FILE" ]; then
-  BASE_URL=$(grep '^KANBAN_BASE_URL=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-  AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-fi
-
-# 3. Fallback: legacy kanban.json with embedded auth (backward compat)
-if [ -z "${BASE_URL:-}" ]; then
-  BASE_URL=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url') or '')" 2>/dev/null || true)
-fi
-if [ -z "${AUTH_TOKEN:-}" ]; then
-  AUTH_TOKEN=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth_token') or '')" 2>/dev/null || true)
-fi
-
-# 4. Defaults
-BASE_URL="${BASE_URL:-https://cyanlunakanban.vercel.app}"
-AUTH_HEADER=()
-if [ -n "$AUTH_TOKEN" ]; then
-  AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
-fi
+DB="$HOME/.claude/kanban-dbs/${PROJECT}.db"
 ```
 
-If neither config file exists, prompt user to run `/kanban-init`, or fall back to:
+If `.claude/kanban.json` doesn't exist, prompt user to run `/kanban-init`, or fall back to:
 
 ```bash
 PROJECT=$(basename "$(pwd)")
-BASE_URL="https://cyanlunakanban.vercel.app"
-AUTH_TOKEN=""
-AUTH_HEADER=()
+DB="$HOME/.claude/kanban-dbs/${PROJECT}.db"
 ```
 
-**Auth resolution priority:** `~/.claude/kanban-auth` > kanban.json (legacy) > defaults.
-`kanban.json` should only contain `{ "project": "..." }`. The `auth_token` and `base_url` fields in kanban.json are supported for backward compatibility but deprecated.
-
-Quick debug check before a failing request:
-
-```bash
-echo "KANBAN_PROJECT=$PROJECT"
-echo "KANBAN_BASE_URL=$BASE_URL"
-echo "KANBAN_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
-echo "KANBAN_AUTH_SOURCE=$([ -f "$HOME/.claude/kanban-auth" ] && echo kanban-auth || echo kanban.json)"
-```
+> **IMPORTANT**: Use `sqlite3` CLI. Do NOT use `python3 -c "import sqlite3..."` for read/update operations — use the CLI directly. Python is only for complex inserts with user-supplied text (see JSON Safety below).
 
 ## Pipeline Levels
 
@@ -92,9 +57,9 @@ Model keys are resolved to real provider models through `models.json`.
 **Step 1 — 현재 상태 확인**
 
 ```bash
-TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
-STATUS=$(echo "$TASK" | jq -r '.status')
-LEVEL=$(echo "$TASK" | jq -r '.level')
+ROW=$(sqlite3 -json "$DB" "SELECT status, level FROM tasks WHERE id=$ID AND project='$PROJECT'")
+STATUS=$(echo "$ROW" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['status'] if d else '')")
+LEVEL=$(echo "$ROW" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['level'] if d else 2)")
 ```
 
 **Step 2 — Level × Status 매트릭스로 다음 상태 결정**
@@ -109,160 +74,179 @@ LEVEL=$(echo "$TASK" | jq -r '.level')
 | `test`      | —        | —                 | `done` / `impl`        |
 | `done`      | (terminal) | (terminal)      | (terminal)             |
 
-**Step 3 — 이동 실행**
+**Step 3 — 전환 유효성 검사 후 이동 실행**
+
+전환이 매트릭스에서 유효하면 실행:
 
 ```bash
-RESPONSE=$(curl -s -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d "{\"status\": \"$NEXT_STATUS\"}")
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | head -1)
+sqlite3 "$DB" "UPDATE tasks SET status='$NEXT_STATUS', updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
 ```
 
-**400 발생 시 자기 교정 (1회)**
-
-```bash
-if [ "$HTTP_CODE" = "400" ]; then
-  # API 응답의 allowed 배열에서 유효한 목적지를 읽어 재시도
-  ALLOWED=$(echo "$BODY" | jq -r '.allowed[0]')
-  if [ -n "$ALLOWED" ] && [ "$ALLOWED" != "null" ]; then
-    curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
-      -H 'Content-Type: application/json' \
-      -d "{\"status\": \"$ALLOWED\"}"
-  else
-    # allowed도 없으면: 상태 유지, agent_log에 기록, 사용자에게 알림
-    echo "ERROR: cannot move task $ID from $STATUS — API returned: $BODY"
-  fi
-fi
-```
+유효하지 않은 전환 시: 오류 메시지 출력, 상태 유지, 사용자에게 매트릭스 기준으로 올바른 다음 상태 안내.
 
 2회 연속 실패 시: 상태 유지, `agent_log`에 실패 내역 기록, 사용자에게 알림.
 
-## API Access
+## DB Access
 
-All DB operations go through the deployed kanban-board HTTP API (`$BASE_URL`).
-Do not bypass it with local DB access.
+모든 DB 조작은 `sqlite3` CLI를 사용한다. API 서버 불필요.
 
-### API Endpoints
-
-```bash
-# Board — full (web UI, task detail views)
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT"
-
-# Board — summary (list/stats/context — excludes large TEXT fields)
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
-
-# Read task — full
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT"
-
-# Read task — agent-specific fields only (always includes id, project, status)
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=title,description,plan"
-
-# Update task fields / status
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"plan": "...", "status": "plan_review"}'
-
-# Create task
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
-  -H 'Content-Type: application/json' \
-  -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"level\": 3, \"description\": \"...\"}"
-
-# Plan review result
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/plan-review?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "..."}'
-
-# Impl review result
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/review?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "..."}'
-
-# Test result
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/test-result?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
-
-# Add note
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"content": "Commit: abc1234"}'
-
-# Reorder
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "plan", "afterId": null, "beforeId": null}'
-
-# Delete
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
-```
-
-If `AUTH_TOKEN` is set, keep using the shared `AUTH_HEADER` array so every request can target the same protected board deployment without repeating conditional header logic.
-
-### Projects API Endpoints
+### 기본 조작 패턴
 
 ```bash
-# List all projects with links
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects"
+# 보드 전체 조회 (column 그룹화용 flat list)
+sqlite3 -json "$DB" \
+  "SELECT id, title, status, priority, level, current_agent, tags FROM tasks WHERE project='$PROJECT' ORDER BY status, rank, id"
 
-# Get single project with task counts and links
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT"
+# 태스크 전체 읽기
+sqlite3 -json "$DB" "SELECT * FROM tasks WHERE id=$ID AND project='$PROJECT'"
 
-# Create/upsert project
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
-  -H 'Content-Type: application/json' \
-  -d '{"id": "my-project", "name": "My Project", "purpose": "...", "stack": "...", "category": "personal"}'
+# 특정 필드만 읽기
+sqlite3 -json "$DB" "SELECT id, title, description, plan, status, level FROM tasks WHERE id=$ID AND project='$PROJECT'"
 
-# Update project fields (purpose, stack, brief, status, category, repo_url)
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"brief": "Current state + direction + recent decisions"}'
+# 상태 업데이트
+sqlite3 "$DB" "UPDATE tasks SET status='plan', planned_at=datetime('now'), updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
 
-# Delete project
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT"
+# 여러 필드 동시 업데이트
+sqlite3 "$DB" "UPDATE tasks SET plan='...', status='plan_review', updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
 
-# List project links
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT/links"
-
-# Create project link
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects/$PROJECT/links" \
-  -H 'Content-Type: application/json' \
-  -d '{"target_id": "other-project", "relation": "depends_on"}'
-
-# Delete project link
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
-  -H 'Content-Type: application/json' \
-  -d '{"target_id": "other-project", "relation": "depends_on"}'
+# 태스크 삭제
+sqlite3 "$DB" "DELETE FROM tasks WHERE id=$ID AND project='$PROJECT'"
 ```
 
-> For full schema, column descriptions, and JSON field formats, read `schema.md`.
+### JSON 필드 조작 (agent_log, review_comments 등)
 
-## JSON Safety in curl
-
-When passing user-supplied text (titles, descriptions) to curl, use `jq` or Python to build the JSON — never embed raw text in shell strings, as literal newlines and quotes break JSON:
+SQLite의 `json_insert` 함수로 JSON 배열에 항목을 추가한다:
 
 ```bash
-# Safe: use jq
-PAYLOAD=$(jq -n \
-  --arg title "$TITLE" \
-  --arg project "$PROJECT" \
-  --arg description "$DESCRIPTION" \
-  --argjson level 2 \
-  '{title: $title, project: $project, priority: "medium", level: $level, description: $description}')
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
-  -H 'Content-Type: application/json' \
-  -d "$PAYLOAD"
+# agent_log에 항목 추가
+NEW_ENTRY=$(python3 -c "
+import json
+print(json.dumps({'agent':'Planner','model':'opus','message':'...','timestamp':'2026-06-02T00:00:00Z','tokens':1500}))
+")
+sqlite3 "$DB" "UPDATE tasks SET agent_log=json_insert(COALESCE(agent_log,'[]'), '\$[#]', json('$NEW_ENTRY')), updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
+
+# plan_review_comments에 리뷰 추가 (plan_review_count도 증가)
+NEW_REVIEW=$(python3 -c "
+import json
+print(json.dumps({'reviewer':'Critic','model':'sonnet','status':'approved','comment':'...','timestamp':'2026-06-02T00:00:00Z'}))
+")
+sqlite3 "$DB" "UPDATE tasks SET plan_review_comments=json_insert(COALESCE(plan_review_comments,'[]'), '\$[#]', json('$NEW_REVIEW')), plan_review_count=plan_review_count+1, updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
+
+# review_comments에 리뷰 추가 (impl_review_count도 증가)
+NEW_REVIEW=$(python3 -c "
+import json
+print(json.dumps({'reviewer':'Inspector','model':'sonnet','status':'approved','comment':'...','timestamp':'2026-06-02T00:00:00Z'}))
+")
+sqlite3 "$DB" "UPDATE tasks SET review_comments=json_insert(COALESCE(review_comments,'[]'), '\$[#]', json('$NEW_REVIEW')), impl_review_count=impl_review_count+1, updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
+
+# test_results에 테스트 결과 추가
+NEW_RESULT=$(python3 -c "
+import json
+print(json.dumps({'tester':'Ranger','status':'pass','lint':'ok','build':'ok','tests':'5/5','comment':'','timestamp':'2026-06-02T00:00:00Z'}))
+")
+sqlite3 "$DB" "UPDATE tasks SET test_results=json_insert(COALESCE(test_results,'[]'), '\$[#]', json('$NEW_RESULT')), updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
+
+# notes에 노트 추가 (커밋 해시 등)
+sqlite3 "$DB" "UPDATE tasks SET notes=json_insert(COALESCE(notes,'[]'), '\$[#]', json('{\"content\":\"Commit: abc1234\",\"timestamp\":\"2026-06-02T00:00:00Z\"}')), updated_at=datetime('now') WHERE id=$ID AND project='$PROJECT'"
+
+# plan_review_comments의 마지막 항목 comment 읽기 (critic_feedback)
+sqlite3 -json "$DB" "SELECT json_extract(plan_review_comments, '\$[#-1].comment') as comment FROM tasks WHERE id=$ID AND project='$PROJECT'"
+
+# review_comments의 마지막 항목 comment 읽기 (inspector_feedback)
+sqlite3 -json "$DB" "SELECT json_extract(review_comments, '\$[#-1].comment') as comment FROM tasks WHERE id=$ID AND project='$PROJECT'"
 ```
 
-Or use Python `json.dumps()` to serialize the body safely.
+### JSON Safety (사용자 입력 처리)
+
+사용자 제공 텍스트(제목, 설명 등)를 삽입할 때는 Python sqlite3 모듈로 파라미터 바인딩을 사용한다:
+
+```bash
+python3 - <<PY
+import sqlite3 as sq
+conn = sq.connect("$DB")
+cur = conn.execute("""
+  INSERT INTO tasks (project, title, description, priority, level, status, tags)
+  VALUES (?, ?, ?, ?, ?, 'todo', '[]')
+""", ("$PROJECT", title_var, description_var, priority_var, level_var))
+task_id = cur.lastrowid
+conn.commit()
+conn.close()
+print(task_id)
+PY
+```
+
+모델이 생성한 내용(plan, implementation_notes 등)은 직접 sqlite3 CLI로 업데이트해도 무방하나, 텍스트에 줄바꿈이나 단따옴표가 포함될 경우 Python을 사용한다:
+
+```bash
+python3 - <<PY
+import sqlite3 as sq
+conn = sq.connect("$DB")
+conn.execute(
+    "UPDATE tasks SET plan=?, updated_at=datetime('now') WHERE id=? AND project=?",
+    (plan_content, task_id, project)
+)
+conn.commit()
+conn.close()
+PY
+```
+
+### 프로젝트 메타데이터 (projects 테이블)
+
+```bash
+# 현재 프로젝트 정보 조회
+sqlite3 -json "$DB" "SELECT * FROM projects WHERE id='$PROJECT'"
+
+# 프로젝트 등록/업데이트
+sqlite3 "$DB" "INSERT OR REPLACE INTO projects (id, name, purpose, stack, brief, status, category, repo_url) VALUES ('$PROJECT', '$NAME', '$PURPOSE', '$STACK', '$BRIEF', 'active', '$CATEGORY', '$REPO_URL')"
+
+# brief만 업데이트
+sqlite3 "$DB" "UPDATE projects SET brief='...' WHERE id='$PROJECT'"
+
+# 모든 프로젝트 조회
+sqlite3 -json "$DB" "SELECT id, name, purpose, status, category FROM projects ORDER BY status, name"
+```
+
+### 태스크 생성 ID 읽기
+
+```bash
+TASK_ID=$(sqlite3 "$DB" "INSERT INTO tasks (project, title, description, priority, level, status, tags) VALUES ('$PROJECT', '$TITLE', '$DESC', '$PRIORITY', $LEVEL, 'todo', '[]') RETURNING id")
+```
+
+또는 Python을 통해 안전하게:
+
+```bash
+TASK_ID=$(python3 - <<PY
+import sqlite3 as sq
+conn = sq.connect("$DB")
+cur = conn.execute("INSERT INTO tasks (project, title, priority, level, status, tags) VALUES (?, ?, ?, ?, 'todo', '[]')", ("$PROJECT", "$TITLE", "$PRIORITY", $LEVEL))
+print(cur.lastrowid)
+conn.commit()
+conn.close()
+PY
+)
+```
+
+## 보드 JSON 구조 (Python 처리용)
+
+`sqlite3 -json`의 출력은 flat list이다. Python에서 column별로 그룹화:
+
+```python
+import json, sys
+
+rows = json.loads(board_json)  # sqlite3 -json 출력
+board = {}
+for row in rows:
+    col = row['status']
+    board.setdefault(col, []).append(row)
+
+columns = ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']
+# 이후 board.get('todo', []) 등으로 접근
+```
 
 ## Error Handling
 
-> **CRITICAL: If the API call fails, NEVER fall back to SQLite or any direct DB access.**
-> The kanban DB is PostgreSQL — there is no local SQLite file. Fix the API call and retry.
-
-- **Board unreachable**: Check `BASE_URL`, network reachability to `https://cyanlunakanban.vercel.app`, and whether `AUTH_TOKEN` is configured
-- **API error**: Debug the request (check JSON validity, `PROJECT`, `BASE_URL`, and whether `AUTH_TOKEN` is configured) — do NOT bypass the API
+- **DB 파일 없음**: `/kanban-init` 실행 여부 확인. `$DB` 경로에 파일 존재 여부 확인.
+- **sqlite3 없음**: `apt install sqlite3` 또는 동등한 명령으로 설치.
 - **Agent failure**: 1 retry on first failure; 2nd failure → keep status, log to `agent_log`, notify user
 - **Plan review loop**: `plan_review_count > 3` → circuit breaker, ask user
 - **Impl review loop**: `impl_review_count > 3` → circuit breaker, ask user
@@ -307,9 +291,9 @@ Extract each `#ID` number. If the line is absent or no IDs match, dependency lis
 
 ### Fetching Dependency Data
 
-For each dependency ID, fetch:
+For each dependency ID, fetch from SQLite:
 ```bash
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes"
+sqlite3 -json "$DB" "SELECT id, title, status, decision_log, implementation_notes FROM tasks WHERE id=$DEP_ID AND project='$PROJECT'"
 ```
 
 All fields are fetched once and cached. Per-agent filtering happens at context assembly time, not at fetch time.
@@ -341,7 +325,7 @@ Fields not applicable to the current agent are omitted entirely.
 
 ### Error Handling
 
-- **404 response**: warn in orchestrator log, skip that dependency, continue pipeline
+- **Task not found (empty result)**: warn in orchestrator log, skip that dependency, continue pipeline
 - **Dep task in progress** (status != `done`): prepend `[IN PROGRESS]` warning to that dep's context block
 - **Circular dependency**: if current task ID appears in a dependency's `Depends on:` line, emit error and abort the pipeline
 - **No dependencies**: `<dependencies_context>` resolves to empty string; no behavioral change
@@ -356,3 +340,9 @@ These placeholders carry feedback from previous review cycles (re-runs):
 | `<inspector_feedback>` | `review_comments` | Builder re-run: last entry's `comment` from the JSON array |
 
 If the source field is empty or null (first run), the placeholder resolves to empty string.
+
+Read last entry:
+```bash
+CRITIC_FEEDBACK=$(sqlite3 "$DB" "SELECT json_extract(plan_review_comments, '\$[#-1].comment') FROM tasks WHERE id=$ID AND project='$PROJECT'")
+INSPECTOR_FEEDBACK=$(sqlite3 "$DB" "SELECT json_extract(review_comments, '\$[#-1].comment') FROM tasks WHERE id=$ID AND project='$PROJECT'")
+```

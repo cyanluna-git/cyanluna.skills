@@ -4,7 +4,7 @@
 
 ```sql
 CREATE TABLE IF NOT EXISTS tasks (
-  id SERIAL PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   project TEXT NOT NULL,
   title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'todo',
@@ -12,26 +12,27 @@ CREATE TABLE IF NOT EXISTS tasks (
   description TEXT,
   plan TEXT,
   implementation_notes TEXT,
-  tags TEXT,
-  review_comments TEXT,
-  plan_review_comments TEXT,
-  test_results TEXT,
-  agent_log TEXT,
+  tags TEXT DEFAULT '[]',
+  review_comments TEXT DEFAULT '[]',
+  plan_review_comments TEXT DEFAULT '[]',
+  test_results TEXT DEFAULT '[]',
+  agent_log TEXT DEFAULT '[]',
+  notes TEXT DEFAULT '[]',
   current_agent TEXT,
   plan_review_count INTEGER NOT NULL DEFAULT 0,
   impl_review_count INTEGER NOT NULL DEFAULT 0,
   level INTEGER NOT NULL DEFAULT 3,
-  attachments TEXT,
-  notes TEXT,
+  attachments TEXT DEFAULT '[]',
   decision_log TEXT,
   done_when TEXT,
   rank INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  started_at TIMESTAMPTZ,
-  planned_at TIMESTAMPTZ,
-  reviewed_at TIMESTAMPTZ,
-  tested_at TIMESTAMPTZ,
-  completed_at TIMESTAMPTZ
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  started_at TEXT,
+  planned_at TEXT,
+  reviewed_at TEXT,
+  tested_at TEXT,
+  completed_at TEXT
 );
 ```
 
@@ -152,40 +153,38 @@ If unknown or uncertain, omit the field — missing tokens count as 0 in stats.
 
 ## Appending to agent_log (orchestrator)
 
-After each agent completes, the orchestrator appends a signed entry:
+After each agent completes, the orchestrator appends a signed entry using SQLite `json_insert`:
 
-```python
-python3 -c "
-import subprocess, json, datetime
-d = json.loads(subprocess.run(['curl','-s',f'{base_url}/api/task/{task_id}?project={project}', *auth_header], capture_output=True, text=True).stdout)
-log = json.loads(d.get('agent_log') or '[]')
-log.append({
+```bash
+NEW_ENTRY=$(python3 -c "
+import json, datetime
+entry = {
   'agent': 'NICKNAME',
   'model': 'MODEL',
   'message': 'MESSAGE',
-  'tokens': TOKENS,  # optional: estimated input+output tokens, omit if unknown
+  'tokens': TOKENS,
   'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'
-})
-subprocess.run(['curl','-s',*auth_header,'-X','PATCH',f'{base_url}/api/task/{task_id}?project={project}','-H','Content-Type: application/json','-d',json.dumps({'agent_log':json.dumps(log)})], capture_output=True)
-"
+}
+print(json.dumps(entry))
+")
+sqlite3 "\$DB" "UPDATE tasks SET agent_log=json_insert(COALESCE(agent_log,'[]'), '\$[#]', json('\$NEW_ENTRY')), updated_at=datetime('now') WHERE id=\$ID AND project='\$PROJECT'"
 ```
 
-Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
+Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`. Omit `tokens` if unknown.
 
 ## Table: projects
 
 ```sql
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
+  name TEXT,
   purpose TEXT,
   stack TEXT,
   brief TEXT,
   status TEXT DEFAULT 'active',
   category TEXT,
   repo_url TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TEXT DEFAULT (datetime('now'))
 );
 ```
 
@@ -204,8 +203,8 @@ CREATE TABLE IF NOT EXISTS projects (
 
 ```sql
 CREATE TABLE IF NOT EXISTS project_links (
-  source_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-  target_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
   relation TEXT NOT NULL,
   PRIMARY KEY (source_id, target_id, relation)
 );
@@ -219,5 +218,5 @@ CREATE TABLE IF NOT EXISTS project_links (
 
 ## Schema Migrations
 
-New columns are added with `ADD COLUMN IF NOT EXISTS` in PostgreSQL — idempotent, no try/catch needed.
-The `kanban-api.ts` plugin runs migrations automatically on server startup.
+New columns can be added with `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS ...` in SQLite (supported since 3.37.0).
+`CREATE TABLE IF NOT EXISTS` in `/kanban-init` is idempotent — safe to run again on existing DBs.

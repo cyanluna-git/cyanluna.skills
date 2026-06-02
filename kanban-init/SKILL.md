@@ -1,58 +1,41 @@
 ---
 name: kanban-init
-description: "Register and initialize the current project in PostgreSQL kanban. Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init."
+description: "Initialize the current project in local SQLite kanban. Creates ~/.claude/kanban-dbs/{project}.db and writes local config. Usage: /kanban-init or /kanban-init my-project-name. Run with /kanban-init."
 license: MIT
 ---
 
-Registers the current project in **PostgreSQL** (shared central DB) and creates a local config so `/kanban` knows which project to use.
-No per-project DB file is created — the central PostgreSQL server handles storage for all projects automatically.
+Initializes the current project with a **local SQLite** kanban database at `~/.claude/kanban-dbs/{project}.db`.
+No server, no auth, no internet required — everything runs locally.
 
 ## Usage
 
 ```
-/kanban-init                                      — project name = basename of current directory, board = https://cyanlunakanban.vercel.app
-/kanban-init my-project-name                      — explicit project name, board = https://cyanlunakanban.vercel.app
-/kanban-init my-project-name https://board.example.com
-                                                 — explicit project name + remote board URL
-/kanban-init https://board.example.com           — current directory name + remote board URL
+/kanban-init                           — project name = basename of current directory
+/kanban-init my-project-name           — explicit project name
 ```
 
-If a URL argument is present, treat it as `base_url`. Strip any leading dashes from the project token: `kanban-init -unahouse.finance` → project `unahouse.finance`.
+Strip any leading dashes from the project token: `/kanban-init -unahouse.finance` → project `unahouse.finance`.
 
 ## Procedure
 
-### 1. Determine project name and board URL
+### 1. Determine project name
 
 ```bash
-# Split raw args
-set -- $ARG
-ARG1="${1:-}"
-ARG2="${2:-}"
-
-# Accept either:
-#   /kanban-init my-project
-#   /kanban-init my-project https://board.example.com
-#   /kanban-init https://board.example.com
-if printf '%s' "$ARG1" | grep -Eq '^https?://'; then
+ARG="${1:-}"
+PROJECT=$(printf '%s' "$ARG" | sed 's/^-*//' | sed 's/\.db$//')
+if [ -z "$PROJECT" ]; then
   PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
-  BASE_URL="$ARG1"
-else
-  PROJECT=$(printf '%s' "$ARG1" | sed 's/^-*//' | sed 's/\.db$//')
-  if [ -z "$PROJECT" ]; then
-    PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
-  fi
-  BASE_URL="${ARG2:-https://cyanlunakanban.vercel.app}"
 fi
-
+DB="$HOME/.claude/kanban-dbs/${PROJECT}.db"
 ```
 
-**Always strip `.db` suffix** — old configs stored the DB filename as the project name (e.g. `cpet.db`), which would conflict without this fix.
+**Always strip `.db` suffix** — old configs stored the DB filename as the project name (e.g. `cpet.db`).
 
 ### 2. Write local project config
 
-Create both config files in the **current project root**:
+Create in the **current project root**:
 - `.claude/kanban.json`
-- `.codex/kanban.json`
+- `.codex/kanban.json` (for Codex compatibility)
 
 ```json
 {
@@ -60,31 +43,69 @@ Create both config files in the **current project root**:
 }
 ```
 
-**kanban.json stores ONLY the project name.** Auth credentials (`base_url`, `auth_token`) are stored separately in `~/.claude/kanban-auth`.
-
 Use the Write tool to create both files with the same content.
 
-### 2b. Set up global auth (if not exists)
-
-Check if `~/.claude/kanban-auth` exists. If not, and a `BASE_URL` was provided:
+### 3. Create SQLite database
 
 ```bash
-KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-if [ ! -f "$KANBAN_AUTH_FILE" ]; then
-  # Write global auth file
-  cat > "$KANBAN_AUTH_FILE" << EOF
-KANBAN_BASE_URL=$BASE_URL
-KANBAN_AUTH_TOKEN=${KANBAN_AUTH_TOKEN:-}
-EOF
-fi
+mkdir -p "$HOME/.claude/kanban-dbs"
+sqlite3 "$DB" << 'SQL'
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'todo',
+  priority TEXT NOT NULL DEFAULT 'medium',
+  description TEXT,
+  plan TEXT,
+  implementation_notes TEXT,
+  tags TEXT DEFAULT '[]',
+  review_comments TEXT DEFAULT '[]',
+  plan_review_comments TEXT DEFAULT '[]',
+  test_results TEXT DEFAULT '[]',
+  agent_log TEXT DEFAULT '[]',
+  notes TEXT DEFAULT '[]',
+  current_agent TEXT,
+  plan_review_count INTEGER NOT NULL DEFAULT 0,
+  impl_review_count INTEGER NOT NULL DEFAULT 0,
+  level INTEGER NOT NULL DEFAULT 3,
+  attachments TEXT DEFAULT '[]',
+  decision_log TEXT,
+  done_when TEXT,
+  rank INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  started_at TEXT,
+  planned_at TEXT,
+  reviewed_at TEXT,
+  tested_at TEXT,
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  purpose TEXT,
+  stack TEXT,
+  brief TEXT,
+  status TEXT DEFAULT 'active',
+  category TEXT,
+  repo_url TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS project_links (
+  source_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  relation TEXT NOT NULL,
+  PRIMARY KEY (source_id, target_id, relation)
+);
+SQL
 ```
 
-If `~/.claude/kanban-auth` already exists, show its current `KANBAN_BASE_URL` and confirm it matches. Do NOT overwrite without asking.
+If the DB already exists (table already created), `CREATE TABLE IF NOT EXISTS` is idempotent — safe to run again.
 
-### 2c. Auto-register project in projects table
-
-After writing the config, upsert the current project to the projects table via POST /api/projects.
-Infer project metadata from the local environment:
+### 4. Register project metadata (best-effort)
 
 ```bash
 # Infer category from path
@@ -101,50 +122,34 @@ else
   CATEGORY="personal"
 fi
 
-# Infer purpose from CLAUDE.md (first non-heading, non-empty line)
-PURPOSE=""
-if [ -f "CLAUDE.md" ]; then
-  PURPOSE=$(grep -v '^#' CLAUDE.md | grep -v '^---' | grep -v '^\s*$' | head -1 | cut -c1-300)
-fi
-
-# Infer stack from CLAUDE.md
-STACK=""
-if [ -f "CLAUDE.md" ]; then
-  STACK=$(grep -iE 'stack|tech|typescript|javascript|python|react|vue|next|node|vite' CLAUDE.md | head -1 | cut -c1-200)
-fi
+# Infer purpose from CLAUDE.md
+PURPOSE=$(grep -v '^#' CLAUDE.md 2>/dev/null | grep -v '^---' | grep -v '^\s*$' | head -1 | cut -c1-300 || echo "")
 
 # Infer repo_url from git remote
 REPO_URL=$(git remote get-url origin 2>/dev/null || echo "")
-
-# Upsert project
-PROJ_PAYLOAD=$(python3 -c "
-import json
-print(json.dumps({
-  'id': '$PROJECT',
-  'name': '$PROJECT',
-  'purpose': '''$PURPOSE''' if '''$PURPOSE''' else None,
-  'stack': '''$STACK''' if '''$STACK''' else None,
-  'category': '$CATEGORY',
-  'repo_url': '$REPO_URL' if '$REPO_URL' else None,
-}))
-")
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
-  -H 'Content-Type: application/json' \
-  -d "$PROJ_PAYLOAD" > /dev/null 2>&1 || true
 ```
 
-This is best-effort — if the API call fails (e.g., server not running), init still succeeds.
+Then upsert into projects table:
 
-### 3. Output confirmation
-
-Output:
+```bash
+sqlite3 "$DB" "INSERT OR REPLACE INTO projects (id, name, category, repo_url) VALUES ('$PROJECT', '$PROJECT', '$CATEGORY', '$REPO_URL')"
 ```
-✅ Project '<PROJECT_NAME>' registered in kanban.
 
-  Config:  .codex/kanban.json, .claude/kanban.json
-  DB:      PostgreSQL (shared central DB)
-  Board:   <BASE_URL>/?project=<PROJECT_NAME>
-  Auth:    ~/.claude/kanban-auth (global, shared across all projects)
+If PURPOSE is set:
+```bash
+sqlite3 "$DB" "UPDATE projects SET purpose='$PURPOSE' WHERE id='$PROJECT'"
+```
+
+This is best-effort — if it fails (e.g., sqlite3 not found), init still continues.
+
+### 5. Output confirmation
+
+```
+✅ Project '<PROJECT_NAME>' initialized.
+
+  Config:  .claude/kanban.json, .codex/kanban.json
+  DB:      ~/.claude/kanban-dbs/<PROJECT_NAME>.db
+  Tables:  tasks, projects, project_links
 
 Add tasks with /kanban add <title>
 ```
@@ -153,23 +158,36 @@ Add tasks with /kanban add <title>
 
 ### Existing config detection
 
-If either `.codex/kanban.json` or `.claude/kanban.json` already exists:
+If either `.claude/kanban.json` or `.codex/kanban.json` already exists:
 1. Read the `project` field and **strip `.db` suffix** (old format stored DB filename as project name)
-2. If the config contains `base_url` or `auth_token`, migrate them to `~/.claude/kanban-auth` and remove from kanban.json
-3. If the cleaned name differs from what's stored (e.g. `cpet.db` → `cpet`), show the migration clearly
-4. Ask the user whether to overwrite or keep as-is:
+2. If the cleaned name differs from what's stored, show the migration clearly
+3. Ask the user whether to overwrite or keep as-is:
 
 ```
-.codex/kanban.json or .claude/kanban.json already exists:
+.claude/kanban.json already exists:
   Current project: "cpet.db"  →  will use "cpet" (stripped .db suffix)
-  Current board: "https://board.example.com"
 
 Options:
 1. Overwrite — update config
 2. Keep as-is — leave existing config unchanged
 ```
 
-- `/kanban-init` should default to `https://cyanlunakanban.vercel.app` unless the user explicitly provides another deployment URL.
-- `node_modules/` in a local `kanban-board/` is not required for normal kanban usage.
-- Auth credentials are stored globally in `~/.claude/kanban-auth`, NOT in per-project kanban.json. This prevents token duplication across repos and keeps secrets out of git.
-- For remote private boards, set `KANBAN_AUTH_TOKEN` in the shell before running `/kanban-init`, or edit `~/.claude/kanban-auth` directly.
+### Migrating from PostgreSQL kanban
+
+If the user had a PostgreSQL-based kanban (prior `kanban-auth` setup):
+- The old `~/.claude/kanban-auth` file is no longer needed for the SQLite version
+- Data migration from PostgreSQL → SQLite is not automated; start fresh or export manually
+- Tasks in the old PostgreSQL DB are not accessible from the SQLite version
+
+### sqlite3 requirement
+
+The `sqlite3` CLI must be installed on the system:
+```bash
+# Debian/Ubuntu
+apt install sqlite3
+
+# macOS (usually pre-installed)
+brew install sqlite
+```
+
+Verify: `sqlite3 --version`
