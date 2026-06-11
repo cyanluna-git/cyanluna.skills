@@ -39,7 +39,8 @@ This skill explores first, reports direction, then seeds the kanban board with p
 
 ② Deep codebase exploration (Task → Explore agent)
 
-   Launch a Task subagent with subagent_type="Explore".
+   Launch a Task subagent with subagent_type="Explore" and model="fable"
+   (high-reasoning model for deep investigation).
    Pass the following prompt — fill in <TOPIC> and <PROJECT> before launching:
 
    ───────────────────────────────────────────────
@@ -78,7 +79,8 @@ This skill explores first, reports direction, then seeds the kanban board with p
 ② ½ Architecture planning (Agent → Plan subagent)
 
    Save the Explore agent's output as $EXPLORE_FINDINGS.
-   Launch a second Agent subagent with subagent_type="Plan".
+   Launch a second Agent subagent with subagent_type="Plan" and model="fable"
+   (high-reasoning model for architecture planning).
    Pass the following prompt — fill in <TOPIC>, <PROJECT>, and <EXPLORE_FINDINGS>:
 
    ───────────────────────────────────────────────
