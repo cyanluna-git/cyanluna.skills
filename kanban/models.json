@@ -2,8 +2,8 @@
   "default_provider": "claude",
   "providers": {
     "claude": {
-      "refiner": "fable",
-      "planner": "fable",
+      "refiner": "opus",
+      "planner": "opus",
       "critic": "sonnet",
       "builder": "sonnet",
       "shield": "sonnet",
