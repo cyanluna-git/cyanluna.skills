@@ -15,16 +15,36 @@ cd ~/dev/cyanluna.skills/kanban-board
 pnpm install
 ```
 
-## Step 2: Set up global kanban auth
+## Step 2: Set up the shared kanban auth (cross-platform)
 
-Write the file `~/.claude/kanban-auth` with this exact content:
+The auth file is **resolved relative to the dev root** so it works the same on
+Windows / WSL / macOS without a hardcoded home path. Write it at the **canonical
+dev-root location** `<dev-root>/.config/kanban/auth` (e.g. `~/dev/.config/kanban/auth`):
 
-```
+```bash
+mkdir -p ~/dev/.config/kanban && chmod 700 ~/dev/.config/kanban
+cat > ~/dev/.config/kanban/auth <<'EOF'
 KANBAN_BASE_URL=https://cyanlunakanban.vercel.app
-KANBAN_AUTH_TOKEN=<your-kanban-token>   # never commit the real value
+KANBAN_AUTH_TOKEN=<your-kanban-token>
+EOF
+chmod 600 ~/dev/.config/kanban/auth
 ```
 
-This file is shared across all projects. Do NOT put this in git.
+**CRITICAL — keep it out of git.** Add `.config/kanban/` to the dev root's `.gitignore`.
+
+**Resolution precedence** (most specific wins):
+`$KANBAN_AUTH_TOKEN` (env, for CI) > `$KANBAN_AUTH_FILE` (explicit path) >
+`<dev-root>/.config/kanban/auth` (walk up from cwd) > `$XDG_CONFIG_HOME/kanban/auth`
+> `~/.claude/kanban-auth` > `~/.codex/kanban-auth` (legacy fallbacks).
+
+**Per-machine override:** if your projects live elsewhere, export in your shell
+profile (`.zshrc` / `.bashrc` / PowerShell `$PROFILE`):
+
+```bash
+export KANBAN_AUTH_FILE="/your/path/to/kanban-auth"
+```
+
+This file is shared across all projects. Do NOT commit it.
 
 ## Step 3: Initialize all projects
 
@@ -77,7 +97,8 @@ Make it executable: `chmod +x kanban-board/start.sh`
 Run this to confirm the API is reachable and data is intact:
 
 ```bash
-source ~/.claude/kanban-auth
+# Resolve the shared auth (dev-root relative). Adjust the path if you used an override.
+source "$(d="$PWD"; while :; do [ -f "$d/.config/kanban/auth" ] && { echo "$d/.config/kanban/auth"; break; }; [ "$d" = "/" ] && { echo "$HOME/.claude/kanban-auth"; break; }; d=$(dirname "$d"); done)"
 curl -s -H "X-Kanban-Auth: $KANBAN_AUTH_TOKEN" \
   "$KANBAN_BASE_URL/api/board?project=cyanluna.skills&summary=true" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'OK - {d[\"total\"]} tasks')"
@@ -88,7 +109,7 @@ Expected output: `OK - 31 tasks` (or more if new tasks were added).
 ## Architecture Summary
 
 ```
-[All Projects] --> ~/.claude/kanban-auth (global auth)
+[All Projects] --> <dev-root>/.config/kanban/auth (shared auth, dev-root relative)
                        |
                        v
               Vercel (cyanlunakanban.vercel.app)

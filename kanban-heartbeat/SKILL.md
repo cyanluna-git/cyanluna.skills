@@ -19,11 +19,21 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 ```
 ① Auth & Argument Setup
 
-   Load credentials using the standard shared.md pattern:
+   Load credentials using the standard shared.md resolver (cross-platform):
 
-   KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-   BASE_URL=$(grep '^KANBAN_BASE_URL=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-   AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
+   AUTH_TOKEN=""; BASE_URL=""
+   if [ -n "${KANBAN_AUTH_TOKEN:-}" ]; then
+     AUTH_TOKEN="$KANBAN_AUTH_TOKEN"; BASE_URL="${KANBAN_BASE_URL:-}"
+   else
+     _cands=(); [ -n "${KANBAN_AUTH_FILE:-}" ] && _cands+=("$KANBAN_AUTH_FILE")
+     _d="$PWD"; while :; do _cands+=("$_d/.config/kanban/auth"); [ "$_d" = "/" ] && break; _d=$(dirname "$_d"); done
+     _cands+=("${XDG_CONFIG_HOME:-$HOME/.config}/kanban/auth" "$HOME/.claude/kanban-auth" "$HOME/.codex/kanban-auth")
+     for f in "${_cands[@]}"; do [ -n "$f" ] && [ -f "$f" ] || continue
+       BASE_URL=$(grep '^KANBAN_BASE_URL=' "$f" | cut -d= -f2-)
+       AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$f" | cut -d= -f2-); break
+     done
+   fi
+   BASE_URL="${BASE_URL:-http://localhost:5173}"
    AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
 
    Parse CLI arguments:
@@ -192,18 +202,34 @@ while i < len(args):
     else:
         i += 1
 
-# ── Auth setup ───────────────────────────────────────────────────
+# ── Auth setup (cross-platform resolver) ─────────────────────────
 import pathlib, os
-auth_file = pathlib.Path.home() / ".claude" / "kanban-auth"
-base_url = "http://localhost:5173"
+base_url = ""
 auth_token = ""
 
-if auth_file.exists():
-    for line in auth_file.read_text().splitlines():
-        if line.startswith("KANBAN_BASE_URL="):
-            base_url = line.split("=", 1)[1]
-        elif line.startswith("KANBAN_AUTH_TOKEN="):
-            auth_token = line.split("=", 1)[1]
+if os.environ.get("KANBAN_AUTH_TOKEN"):           # direct env (CI / headless)
+    auth_token = os.environ["KANBAN_AUTH_TOKEN"]
+    base_url = os.environ.get("KANBAN_BASE_URL", "")
+else:
+    _cands = []
+    if os.environ.get("KANBAN_AUTH_FILE"):
+        _cands.append(pathlib.Path(os.environ["KANBAN_AUTH_FILE"]))
+    _cwd = pathlib.Path.cwd()
+    _cands += [p / ".config" / "kanban" / "auth" for p in [_cwd, *_cwd.parents]]
+    _xdg = os.environ.get("XDG_CONFIG_HOME") or str(pathlib.Path.home() / ".config")
+    _cands += [pathlib.Path(_xdg) / "kanban" / "auth",
+               pathlib.Path.home() / ".claude" / "kanban-auth",
+               pathlib.Path.home() / ".codex" / "kanban-auth"]
+    for _f in _cands:
+        if _f.is_file():
+            for line in _f.read_text().splitlines():
+                if line.startswith("KANBAN_BASE_URL="):
+                    base_url = line.split("=", 1)[1]
+                elif line.startswith("KANBAN_AUTH_TOKEN="):
+                    auth_token = line.split("=", 1)[1]
+            break
+
+base_url = base_url or "http://localhost:5173"
 
 def curl_get(url):
     cmd = ["curl", "-s", url]
