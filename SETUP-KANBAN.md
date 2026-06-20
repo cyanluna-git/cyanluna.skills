@@ -21,7 +21,7 @@ Write the file `~/.claude/kanban-auth` with this exact content:
 
 ```
 KANBAN_BASE_URL=https://cyanlunakanban.vercel.app
-KANBAN_AUTH_TOKEN=2+pg9CUzHgjjKDXxWNpMuRpnVPTTAZ5T042F+nwLz5M=
+KANBAN_AUTH_TOKEN=<your-kanban-token>   # never commit the real value
 ```
 
 This file is shared across all projects. Do NOT put this in git.

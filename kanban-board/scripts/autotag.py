@@ -3,6 +3,7 @@ autotag.py — DB 전처리: 모든 태스크 타이틀 기반 자동 태깅
 Usage: python3 scripts/autotag.py [--dry-run] [--project <id>]
 """
 
+import os
 import re
 import json
 import subprocess
@@ -10,8 +11,8 @@ import sys
 import time
 from typing import Optional
 
-BASE_URL = "https://cyanlunakanban.vercel.app"
-AUTH_TOKEN = "2+pg9CUzHgjjKDXxWNpMuRpnVPTTAZ5T042F+nwLz5M="
+BASE_URL = os.environ.get("KANBAN_BASE_URL", "https://cyanlunakanban.vercel.app")
+AUTH_TOKEN = os.environ.get("KANBAN_AUTH_TOKEN", "")
 
 ALL_PROJECTS = [
     "edwards.oqc.infra",
