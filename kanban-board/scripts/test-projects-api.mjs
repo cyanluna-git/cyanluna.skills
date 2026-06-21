@@ -25,7 +25,7 @@ function getArg(name, fallback) {
 }
 
 const BASE_URL = getArg("base-url", "https://cyanlunakanban.vercel.app").replace(/\/$/, "");
-const AUTH_TOKEN = getArg("auth-token", "2+pg9CUzHgjjKDXxWNpMuRpnVPTTAZ5T042F+nwLz5M=");
+const AUTH_TOKEN = getArg("auth-token", process.env.KANBAN_AUTH_TOKEN || "");
 
 const headers = { "Content-Type": "application/json", "X-Kanban-Auth": AUTH_TOKEN };
 

@@ -6,18 +6,41 @@ All projects share a single centralized DB — the kanban-board server must be r
 ## DB Path & Project Config
 
 Read project config from `.codex/kanban.json` or `.claude/kanban.json` (created by `/kanban-init`).
-Auth credentials are loaded from the global `~/.claude/kanban-auth` file (shared across all projects).
+Auth is **shared across all projects and resolved cross-platform** (Windows / WSL / macOS) — no hardcoded home path. The canonical store is a **dev-root-relative** file `<dev-root>/.config/kanban/auth`, found by walking up from the current directory. Overrides and fallbacks are layered (see below).
 
 ```bash
 # 1. Project config (project name only)
 CONFIG=$(cat .codex/kanban.json 2>/dev/null || cat .claude/kanban.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
 
-# 2. Auth from ~/.claude/kanban-auth (global, shared across projects)
-KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-if [ -f "$KANBAN_AUTH_FILE" ]; then
-  BASE_URL=$(grep '^KANBAN_BASE_URL=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-  AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
+# 2. Resolve shared auth — cross-platform, no hardcoded home path.
+#    Precedence: env token > $KANBAN_AUTH_FILE > <dev-root>/.config/kanban/auth
+#    (walk up from $PWD) > XDG/home fallbacks (backward compat).
+KANBAN_AUTH_FILE_RESOLVED=""
+if [ -n "${KANBAN_AUTH_TOKEN:-}" ]; then
+  # (a) Direct env injection (CI / headless): token already exported.
+  AUTH_TOKEN="$KANBAN_AUTH_TOKEN"
+  BASE_URL="${KANBAN_BASE_URL:-${BASE_URL:-}}"
+else
+  _cands=()
+  [ -n "${KANBAN_AUTH_FILE:-}" ] && _cands+=("$KANBAN_AUTH_FILE")   # (b) explicit override
+  _d="$PWD"                                                          # (c) dev-root relative
+  while :; do
+    _cands+=("$_d/.config/kanban/auth")
+    [ "$_d" = "/" ] && break
+    _d=$(dirname "$_d")
+  done
+  _cands+=( \
+    "${XDG_CONFIG_HOME:-$HOME/.config}/kanban/auth" \
+    "$HOME/.claude/kanban-auth" \
+    "$HOME/.codex/kanban-auth" )                                     # (d) fallbacks
+  for f in "${_cands[@]}"; do
+    [ -n "$f" ] && [ -f "$f" ] || continue
+    KANBAN_AUTH_FILE_RESOLVED="$f"
+    BASE_URL=$(grep '^KANBAN_BASE_URL=' "$f" | cut -d= -f2-)
+    AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$f" | cut -d= -f2-)
+    break
+  done
 fi
 
 # 3. Fallback: legacy kanban.json with embedded auth (backward compat)
@@ -45,7 +68,10 @@ AUTH_TOKEN=""
 AUTH_HEADER=()
 ```
 
-**Auth resolution priority:** `~/.claude/kanban-auth` > kanban.json (legacy) > defaults.
+**Auth resolution priority:** `$KANBAN_AUTH_TOKEN` (env) > `$KANBAN_AUTH_FILE` > `<dev-root>/.config/kanban/auth` (walk-up) > `$XDG_CONFIG_HOME/kanban/auth` > `~/.claude/kanban-auth` > `~/.codex/kanban-auth` > kanban.json (legacy) > defaults.
+
+**Per-machine override:** export `KANBAN_AUTH_FILE=/abs/path` (e.g. in `.zshrc`/`.bashrc`/`$PROFILE`) to point at the token file wherever it lives on that machine; or export `KANBAN_AUTH_TOKEN` directly (CI). The dev-root file must be **gitignored** (`.config/kanban/` under the dev root) — never commit it.
+
 `kanban.json` should only contain `{ "project": "..." }`. The `auth_token` and `base_url` fields in kanban.json are supported for backward compatibility but deprecated.
 
 Quick debug check before a failing request:
@@ -54,7 +80,7 @@ Quick debug check before a failing request:
 echo "KANBAN_PROJECT=$PROJECT"
 echo "KANBAN_BASE_URL=$BASE_URL"
 echo "KANBAN_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
-echo "KANBAN_AUTH_SOURCE=$([ -f "$HOME/.claude/kanban-auth" ] && echo kanban-auth || echo kanban.json)"
+echo "KANBAN_AUTH_SOURCE=${KANBAN_AUTH_FILE_RESOLVED:-${KANBAN_AUTH_TOKEN:+env}}"
 ```
 
 ## Pipeline Levels

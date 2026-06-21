@@ -39,11 +39,40 @@ HOTSPOT_HINTS = {
 }
 
 
+def _resolve_kanban_auth_file() -> "pathlib.Path | None":
+    """Locate the shared auth file cross-platform (Win/WSL/Mac).
+
+    Precedence: $KANBAN_AUTH_FILE > <dev-root>/.config/kanban/auth (walk up from
+    cwd) > $XDG_CONFIG_HOME/kanban/auth > ~/.claude/kanban-auth > ~/.codex/kanban-auth.
+    """
+    candidates: list[pathlib.Path] = []
+    if os.environ.get("KANBAN_AUTH_FILE"):
+        candidates.append(pathlib.Path(os.environ["KANBAN_AUTH_FILE"]))
+    cwd = pathlib.Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        candidates.append(parent / ".config" / "kanban" / "auth")
+    xdg = os.environ.get("XDG_CONFIG_HOME") or str(pathlib.Path.home() / ".config")
+    candidates += [
+        pathlib.Path(xdg) / "kanban" / "auth",
+        pathlib.Path.home() / ".claude" / "kanban-auth",
+        pathlib.Path.home() / ".codex" / "kanban-auth",
+    ]
+    for f in candidates:
+        if f.is_file():
+            return f
+    return None
+
+
 def load_kanban_auth() -> dict[str, str]:
-    """Load global auth from ~/.claude/kanban-auth."""
-    auth_file = pathlib.Path.home() / ".claude" / "kanban-auth"
+    """Load shared auth (dev-root .config/kanban/auth or env override)."""
     result: dict[str, str] = {}
-    if not auth_file.is_file():
+    if os.environ.get("KANBAN_AUTH_TOKEN"):  # direct env injection (CI / headless)
+        result["KANBAN_AUTH_TOKEN"] = os.environ["KANBAN_AUTH_TOKEN"]
+        if os.environ.get("KANBAN_BASE_URL"):
+            result["KANBAN_BASE_URL"] = os.environ["KANBAN_BASE_URL"]
+        return result
+    auth_file = _resolve_kanban_auth_file()
+    if auth_file is None:
         return result
     try:
         for line in auth_file.read_text().splitlines():

@@ -33,20 +33,67 @@ ARG2="${2:-}"
 #   /kanban-init my-project
 #   /kanban-init my-project https://board.example.com
 #   /kanban-init https://board.example.com
+ARG_BASE_URL=""   # only set when explicitly passed on the command line
 if printf '%s' "$ARG1" | grep -Eq '^https?://'; then
   PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
-  BASE_URL="$ARG1"
+  ARG_BASE_URL="$ARG1"
 else
   PROJECT=$(printf '%s' "$ARG1" | sed 's/^-*//' | sed 's/\.db$//')
   if [ -z "$PROJECT" ]; then
     PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
   fi
-  BASE_URL="${ARG2:-http://localhost:5173}"
+  if printf '%s' "$ARG2" | grep -Eq '^https?://'; then
+    ARG_BASE_URL="$ARG2"
+  fi
 fi
 
 ```
 
 **Always strip `.db` suffix** — old configs stored the DB filename as the project name (e.g. `cpet.db`), which would conflict without this fix.
+
+### 1b. Load the shared root auth (single source of truth, cross-platform)
+
+**Always source credentials from the shared store** — never invent a per-project
+token. The auth file is resolved **relative to the dev root** (`<dev-root>/.config/kanban/auth`)
+by walking up from the current directory, so it works the same on Windows / WSL /
+macOS without any hardcoded home path. Env vars override for per-machine / CI.
+
+```bash
+# Precedence: $KANBAN_AUTH_TOKEN (env) > $KANBAN_AUTH_FILE > <dev-root>/.config/kanban/auth
+#             (walk up from $PWD) > XDG/home fallbacks (backward compat).
+SHARED_BASE_URL=""
+AUTH_TOKEN=""
+AUTH_SRC=""
+if [ -n "${KANBAN_AUTH_TOKEN:-}" ]; then
+  AUTH_TOKEN="$KANBAN_AUTH_TOKEN"; SHARED_BASE_URL="${KANBAN_BASE_URL:-}"; AUTH_SRC="env"
+else
+  _cands=()
+  [ -n "${KANBAN_AUTH_FILE:-}" ] && _cands+=("$KANBAN_AUTH_FILE")
+  _d="$PWD"
+  while :; do _cands+=("$_d/.config/kanban/auth"); [ "$_d" = "/" ] && break; _d=$(dirname "$_d"); done
+  _cands+=("${XDG_CONFIG_HOME:-$HOME/.config}/kanban/auth" "$HOME/.claude/kanban-auth" "$HOME/.codex/kanban-auth")
+  for f in "${_cands[@]}"; do
+    [ -n "$f" ] && [ -f "$f" ] || continue
+    AUTH_SRC="$f"
+    SHARED_BASE_URL=$(grep '^KANBAN_BASE_URL=' "$f" | cut -d= -f2-)
+    AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$f" | cut -d= -f2-)
+    break
+  done
+fi
+
+# BASE_URL priority: explicit CLI arg > shared auth > localhost default
+BASE_URL="${ARG_BASE_URL:-${SHARED_BASE_URL:-http://localhost:5173}}"
+
+# Build the auth header from the SHARED token — used by every API call below
+AUTH_HEADER=()
+[ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
+
+echo "KANBAN_BASE_URL=$BASE_URL"
+echo "KANBAN_AUTH=$([ -n "$AUTH_TOKEN" ] && echo "shared key (${AUTH_SRC})" || echo 'none — create <dev-root>/.config/kanban/auth or set KANBAN_AUTH_FILE')"
+```
+
+The resulting `AUTH_HEADER` and `BASE_URL` are reused by step 2c (and any other API
+call) so `/kanban-init` always authenticates with the shared root key.
 
 ### 2. Write local project config
 
@@ -60,26 +107,43 @@ Create both config files in the **current project root**:
 }
 ```
 
-**kanban.json stores ONLY the project name.** Auth credentials (`base_url`, `auth_token`) are stored separately in `~/.claude/kanban-auth`.
+**kanban.json stores ONLY the project name.** Auth credentials (`base_url`, `auth_token`) live in the shared dev-root store `<dev-root>/.config/kanban/auth`, never in kanban.json.
 
 Use the Write tool to create both files with the same content.
 
-### 2b. Set up global auth (if not exists)
+### 2b. Seed the shared auth file ONLY if none was found
 
-Check if `~/.claude/kanban-auth` exists. If not, and a `BASE_URL` was provided:
+Step 1b already resolved the shared key. This step only bootstraps the file on a
+**fresh machine** — it must never overwrite an existing shared key.
 
 ```bash
-KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-if [ ! -f "$KANBAN_AUTH_FILE" ]; then
-  # Write global auth file
-  cat > "$KANBAN_AUTH_FILE" << EOF
+if [ -z "$AUTH_TOKEN" ] && [ -z "$AUTH_SRC" ]; then
+  # No shared auth found anywhere. Create the canonical dev-root file.
+  # Dev root = $KANBAN_DEV_ROOT, else the topmost git repo above $PWD, else ~/dev.
+  DEV_ROOT="${KANBAN_DEV_ROOT:-}"
+  if [ -z "$DEV_ROOT" ]; then
+    _d="$PWD"; _top=""
+    while [ "$_d" != "/" ]; do
+      [ -d "$_d/.git" ] && _top="$_d"
+      _d=$(dirname "$_d")
+    done
+    DEV_ROOT="${_top:-$HOME/dev}"
+  fi
+  AUTH_DIR="$DEV_ROOT/.config/kanban"
+  mkdir -p "$AUTH_DIR" && chmod 700 "$AUTH_DIR"
+  cat > "$AUTH_DIR/auth" << EOF
 KANBAN_BASE_URL=$BASE_URL
 KANBAN_AUTH_TOKEN=${KANBAN_AUTH_TOKEN:-}
 EOF
+  chmod 600 "$AUTH_DIR/auth"
+  # CRITICAL: keep the secret out of git
+  grep -qxF '.config/kanban/' "$DEV_ROOT/.gitignore" 2>/dev/null || printf '\n# kanban shared auth — NEVER commit\n.config/kanban/\n' >> "$DEV_ROOT/.gitignore"
+  echo "Created $AUTH_DIR/auth (shared across all projects under $DEV_ROOT)."
 fi
 ```
 
-If `~/.claude/kanban-auth` already exists, show its current `KANBAN_BASE_URL` and confirm it matches. Do NOT overwrite without asking.
+If a shared key was already found (`$AUTH_SRC` set), **use it as-is** — do NOT
+overwrite, and never copy the token into the project's kanban.json.
 
 ### 2c. Auto-register project in projects table
 
@@ -169,7 +233,7 @@ Output:
   Config:  .codex/kanban.json, .claude/kanban.json
   DB:      PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
-  Auth:    ~/.claude/kanban-auth (global, shared across all projects)
+  Auth:    ${AUTH_SRC:-<dev-root>/.config/kanban/auth} (shared, dev-root relative)
   Start:   ./kanban-board/start.sh
 
 Add tasks with /kanban add <title>
@@ -181,7 +245,7 @@ Add tasks with /kanban add <title>
 
 If either `.codex/kanban.json` or `.claude/kanban.json` already exists:
 1. Read the `project` field and **strip `.db` suffix** (old format stored DB filename as project name)
-2. If the config contains `base_url` or `auth_token`, migrate them to `~/.claude/kanban-auth` and remove from kanban.json
+2. If the config contains legacy `base_url` or `auth_token`, **remove them from kanban.json** (leave only `project`). Migrate the value into `~/.claude/kanban-auth` **only if that file has no token yet** — never overwrite an existing shared key with a stale per-project token (it may be an old/leaked value).
 3. If the cleaned name differs from what's stored (e.g. `cpet.db` → `cpet`), show the migration clearly
 4. Ask the user whether to overwrite or keep as-is:
 
@@ -199,5 +263,6 @@ Options:
 - The central board should exist in either `~/.codex/kanban-board/` or `~/.claude/kanban-board/`. If neither has `package.json`, warn the user.
 - `node_modules/` in the local `kanban-board/` is not created (no `pnpm install` needed — the central board handles its own deps).
 - The kanban-board server must be running (`./kanban-board/start.sh`) before using `/kanban` commands when `base_url` points at localhost.
-- Auth credentials are stored globally in `~/.claude/kanban-auth`, NOT in per-project kanban.json. This prevents token duplication across repos and keeps secrets out of git.
-- For remote private boards, set `KANBAN_AUTH_TOKEN` in the shell before running `/kanban-init`, or edit `~/.claude/kanban-auth` directly.
+- Auth credentials are stored ONCE in the shared dev-root file `<dev-root>/.config/kanban/auth` (resolved by walking up from cwd — cross-platform), NOT in per-project kanban.json. This prevents token duplication across repos and keeps secrets out of git. Resolution precedence: `$KANBAN_AUTH_TOKEN` (env) > `$KANBAN_AUTH_FILE` > `<dev-root>/.config/kanban/auth` > `$XDG_CONFIG_HOME/kanban/auth` > `~/.claude/kanban-auth` > `~/.codex/kanban-auth` (legacy fallbacks).
+- The dev-root `.config/kanban/` MUST be gitignored — never commit the token.
+- For remote private boards, set `KANBAN_AUTH_TOKEN` in the shell before running `/kanban-init`, or edit `<dev-root>/.config/kanban/auth` directly. Per-machine: export `KANBAN_AUTH_FILE=/abs/path` to point elsewhere.
