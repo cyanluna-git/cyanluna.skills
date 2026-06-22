@@ -1151,8 +1151,9 @@ export default async function handler(req, res) {
 
     // ── Projects API ──────────────────────────────────────────────────────────
 
-    // GET /api/projects — List all with links
+    // GET /api/projects — List all (optionally filter by ?category=edwards)
     if (pathname === "/api/projects" && req.method === "GET") {
+      const categoryParam = url.searchParams.get("category");
       const rows = await q(sql, `
         SELECT p.*,
           COALESCE(json_agg(json_build_object(
@@ -1160,9 +1161,10 @@ export default async function handler(req, res) {
           )) FILTER (WHERE pl.source_id IS NOT NULL), '[]') AS links
         FROM projects p
         LEFT JOIN project_links pl ON p.id = pl.source_id OR p.id = pl.target_id
+        WHERE ($1::text IS NULL OR p.category = $1)
         GROUP BY p.id
         ORDER BY p.category, p.name
-      `);
+      `, [categoryParam || null]);
       json(res, 200, { projects: rows });
       return;
     }
